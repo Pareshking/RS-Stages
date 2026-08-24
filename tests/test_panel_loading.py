@@ -138,3 +138,23 @@ def test_an_unreadable_local_panel_is_reported_not_raised(tmp_path, monkeypatch)
 def test_snapshot_no_longer_carries_the_panel():
     """The panel must not ride along in the value cache_data serialises."""
     assert "panel" not in {f for f in loaders.Snapshot.__dataclass_fields__}
+
+
+def test_the_ui_universe_is_the_analytical_universe():
+    """The header count and the analysed count must describe the same set.
+
+    NSE reserves DUMMY-prefixed rows in the constituent CSV for corporate
+    actions. The audit excludes them before computing anything, so a UI that
+    read the CSV raw would advertise a universe two constituents larger than
+    every figure beneath it.
+    """
+    snapshot = loaders.load_snapshot()
+    symbols = snapshot.universe["Symbol"].astype(str)
+    assert not symbols.str.startswith("DUMMY").any()
+    # Every analysed symbol is a member of the universe the header reports.
+    assert set(snapshot.research["Symbol"].astype(str)).issubset(set(symbols))
+    # And the raw file really does carry the rows we are excluding, so this
+    # test would fail if the exclusion were silently dropped upstream.
+    raw = pd.read_csv(loaders.UNIVERSE_PATH)
+    assert raw["Symbol"].astype(str).str.startswith("DUMMY").any()
+    assert len(raw) > len(snapshot.universe)

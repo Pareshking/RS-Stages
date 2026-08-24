@@ -1134,9 +1134,11 @@ def page_methodology() -> None:
         (
             "The universe",
             "The official Nifty Total Market constituent CSV is authoritative; the live count is read "
-            f"from the file rather than hard-coded ({len(SNAP.universe):,} rows in this snapshot). "
-            "Industry is exactly the CSV's Industry field, never remapped. There is no F&O filter. "
-            "Symbols reserved for corporate actions are excluded from the analytical universe.",
+            "from the file rather than hard-coded. Symbols NSE reserves for corporate actions (the "
+            "DUMMY prefix) are excluded before anything is computed, so the analytical universe is "
+            f"{len(SNAP.universe):,} constituents in this snapshot, of which {len(DATA):,} carry "
+            "sufficient history to classify. Industry is exactly the CSV's Industry field, never "
+            "remapped. There is no F&O filter.",
         ),
         (
             "Information boundary",

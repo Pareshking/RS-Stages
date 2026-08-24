@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from ..actions import with_actions
+from ..data import load_nse_constituents_csv
 
 DATA_DIR = Path("data")
 RESEARCH_PATH = DATA_DIR / "latest_research.csv"
@@ -205,8 +206,11 @@ def panel_matches(panel: PricePanel, research: pd.DataFrame) -> str | None:
 def load_snapshot() -> Snapshot:
     """Read every published artifact, recording whatever is unavailable."""
     missing: dict[str, str] = {}
-    universe = pd.read_csv(UNIVERSE_PATH)
-    universe["Symbol"] = universe["Symbol"].astype(str).str.strip()
+    # The same locked loader the audit uses, so the UI's universe *is* the
+    # analytical universe. Reading the CSV raw here counted the DUMMY rows NSE
+    # reserves for corporate actions, so the header advertised 752 constituents
+    # while every figure beneath it was computed over 750.
+    universe = load_nse_constituents_csv(UNIVERSE_PATH)
     research = _read_research(RESEARCH_PATH, universe)
 
     absent = [column for column in V21_FIELDS if column not in research.columns]
