@@ -8,6 +8,7 @@
 - Use the CSV's `Industry` field exactly.
 - No F&O filtering.
 - Do not silently remap symbols or industries.
+- NSE CSV symbols are preserved exactly in the universe; `.NS` is added only when mapping an NSE symbol to Yahoo Finance.
 
 ## Market Data
 
@@ -17,12 +18,15 @@ Use yfinance for market history with `auto_adjust=True`.
 - High: adjusted High
 - Volume: raw share Volume
 - Open/Low are not required for core calculations.
+- The acquisition layer does not silently forward-fill or interpolate market data.
 
 ## Decision Boundary
 
 The system makes decisions before the upcoming NSE session opens.
 
-For decision session `D`, only data through the latest completed session `T` is permitted. The upcoming/incomplete session must never enter any signal calculation.
+For decision session `D`, only data through the latest completed session `T` is permitted. `T` is the latest available session **strictly before D**. If a provider already contains D because its market data was downloaded after the close, D is still excluded from the pre-market snapshot.
+
+The production boundary is implemented by `build_decision_snapshot()` in `rs_stages/data.py` and must run before quantitative signal calculations.
 
 ## Calendar Windows
 
@@ -44,19 +48,29 @@ Download sufficient calendar history to cover the longest required calendar look
 
 Audit missing observations, duplicates, timestamps, market holidays, stale values, corporate actions, symbol changes, delisted securities, volume anomalies, inconsistent frequencies, and calendar mismatches.
 
-Do not forward-fill or interpolate market data unless an explicitly documented methodology requires it.
+Duplicate sessions are rejected. Timestamps are normalized to session dates only after duplicate validation. Insufficient history remains explicitly insufficient.
 
-Insufficient history must remain explicitly insufficient; do not fabricate values.
+## NSE CSV Ingestion
+
+`load_nse_constituents_csv()` requires `Symbol` and `Industry`, rejects missing values and duplicate symbols, and returns the supplied universe without filtering F&O or rewriting industries.
+
+## Yahoo Finance Acquisition
+
+`yfinance_symbol()` maps an NSE CSV symbol to `<SYMBOL>.NS` for Yahoo Finance only. `download_yfinance_history()` uses `auto_adjust=True`, disables actions, rejects empty results, normalizes the session index, and requires `Close`, `High`, and `Volume`.
+
+Acquisition and decision-boundary enforcement are separate: downloaded data must pass through `build_decision_snapshot()` before any signal calculation.
 
 ## Validation
 
-The data layer must be tested independently for:
+The data layer is tested independently for:
 
 1. Calendar reference-date resolution.
 2. Latest-completed-session selection.
-3. Pre-market exclusion of the upcoming session.
+3. Strict pre-market exclusion of the upcoming session even when provider data contains it.
 4. Missing/duplicate observations.
 5. Holiday and non-trading-day handling.
 6. Minimum-history requirements.
 7. Adjusted-price versus raw-volume handling.
 8. Universe/Industry ingestion from the NSE CSV.
+9. Yahoo symbol mapping without changing the underlying NSE universe.
+10. Required market-column validation.
