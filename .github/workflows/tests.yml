@@ -28,7 +28,7 @@ jobs:
           assert version < Version("25"), "PyArrow 25+ is not allowed in the Streamlit runtime"
           PY
       - name: Compile application and package
-        run: python -m compileall -q app.py app_v7.py rs_stages tests
+        run: python -m compileall -q app.py rs_stages tests scripts
       - name: Streamlit production smoke test
         run: |
           python -m streamlit run app.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &

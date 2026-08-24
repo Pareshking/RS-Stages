@@ -5,14 +5,19 @@ explicitly changes the navigation widget and reruns the real production entrypoi
 which is the execution pattern that previously exposed the white-page crash.
 """
 
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
 
+# AppTest resolves a relative path against the file that calls it, which would
+# look for tests/app.py. The entrypoint under test is the repository's own.
+ENTRYPOINT = str(Path(__file__).resolve().parent.parent / "app.py")
 
 VIEWS = ["Dashboard", "Screener", "Industries", "Market", "Movers", "Stock", "Methodology"]
 
 
 def test_production_navigation_survives_repeated_reruns():
-    at = AppTest.from_file("app.py", default_timeout=30).run()
+    at = AppTest.from_file(ENTRYPOINT, default_timeout=30).run()
     assert not at.exception
 
     # st.segmented_control is represented as a button_group by AppTest.
