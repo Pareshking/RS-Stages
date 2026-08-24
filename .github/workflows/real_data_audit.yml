@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       decision_date:
-        description: 'Pre-market decision date (YYYY-MM-DD)'
-        required: true
+        description: 'Optional pre-market decision date (YYYY-MM-DD). Leave blank to use today in IST.'
+        required: false
         type: string
       start_date:
-        description: 'Yahoo history start (YYYY-MM-DD)'
-        required: true
+        description: 'Optional Yahoo history start (YYYY-MM-DD). Leave blank for automatic warm-up history.'
+        required: false
         type: string
       end_date:
-        description: 'Yahoo history end (YYYY-MM-DD, exclusive)'
-        required: true
+        description: 'Optional Yahoo history end (YYYY-MM-DD, exclusive). Leave blank for automatic end date.'
+        required: false
         type: string
 
 permissions:
@@ -49,6 +49,6 @@ jobs:
       - name: Upload research output
         uses: actions/upload-artifact@v4
         with:
-          name: real-data-audit-${{ inputs.decision_date }}
+          name: real-data-audit-${{ inputs.decision_date || 'auto' }}
           path: real_data_audit.csv
           retention-days: 30
