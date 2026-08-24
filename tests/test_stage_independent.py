@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from rs_stages.quant import classify_stage, ma_30w, ma_slope_pct
 
@@ -9,6 +10,20 @@ def _reference_ma(close: pd.Series, end: pd.Timestamp) -> float:
     start = t - pd.Timedelta(weeks=30)
     window = close.loc[(close.index >= start) & (close.index <= t)]
     return float(window.mean())
+
+
+def _reference_stage(close: float, ma: float, slope: float) -> str:
+    if not all(np.isfinite(float(value)) for value in (close, ma, slope)):
+        raise ValueError("missing stage input")
+    above = close > ma
+    rising = slope > 0.0
+    if above and rising:
+        return "Stage 2 — Advancing"
+    if above and not rising:
+        return "Stage 3 — Topping"
+    if not above and not rising:
+        return "Stage 4 — Declining"
+    return "Stage 1 — Basing"
 
 
 def test_30w_ma_matches_independent_calendar_window():
@@ -27,12 +42,34 @@ def test_stage_slope_uses_ten_observations_back_independently():
     assert np.isclose(ma_slope_pct(ma, end, sessions=10), expected, rtol=0, atol=1e-12)
 
 
-def test_stage_boundaries_match_locked_boolean_definition():
+def test_stage_truth_table_including_strict_boundaries():
     cases = [
-        (101.0, 100.0, 0.01, "Stage 2 — Advancing"),
-        (101.0, 100.0, 0.0, "Stage 3 — Topping"),
-        (99.0, 100.0, 0.0, "Stage 4 — Declining"),
-        (99.0, 100.0, 0.01, "Stage 1 — Basing"),
+        (101.0, 100.0, 0.01),
+        (101.0, 100.0, 0.0),
+        (99.0, 100.0, 0.0),
+        (99.0, 100.0, 0.01),
+        (100.0, 100.0, 1.0),
+        (100.0, 100.0, 0.0),
+        (100.0, 100.0, -1.0),
+        (101.0, 101.0, 1.0),
+        (101.0, 101.0, 0.0),
+        (99.0, 99.0, -1.0),
+        (99.0, 99.0, 0.0),
     ]
-    for close, ma, slope, expected in cases:
-        assert classify_stage(close, ma, slope) == expected
+    for close, ma, slope in cases:
+        assert classify_stage(close, ma, slope) == _reference_stage(close, ma, slope)
+
+
+@pytest.mark.parametrize(
+    "close,ma,slope",
+    [
+        (np.nan, 100.0, 1.0),
+        (100.0, np.nan, 1.0),
+        (100.0, 100.0, np.nan),
+        (np.inf, 100.0, 1.0),
+        (100.0, -np.inf, 1.0),
+    ],
+)
+def test_stage_rejects_missing_or_nonfinite_inputs(close, ma, slope):
+    with pytest.raises(ValueError, match="finite"):
+        classify_stage(close, ma, slope)
