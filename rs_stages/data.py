@@ -120,8 +120,13 @@ def download_index_history(
     """Download a benchmark index using the same locked adjustment policy.
 
     Separate from :func:`download_yfinance_history` because an index ticker is
-    not an NSE constituent symbol and must not be mapped as one. The result is
-    reference data for display; no locked calculation consumes it.
+    not an NSE constituent symbol and must not be mapped as one.
+
+    Since v2.2 this is no longer display-only: §4.1's RS line is computed from
+    it and published. It remains outside every decision rule — no Stage, RS
+    ranking, breakout test or Action label reads the index or anything derived
+    from it — so a failed fetch degrades the RS line to unavailable and changes
+    no signal.
     """
     try:
         import yfinance as yf
