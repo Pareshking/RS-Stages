@@ -8,14 +8,16 @@ RS-Stages now uses the official **Nifty Total Market constituent CSV** as its pr
 
 `https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv`
 
-The Nifty Total Market is intended by NSE Indices to cover the broad Indian equity market across large, mid, small and microcap segments; the official index description states 750 stocks. The actual downloaded CSV is authoritative for the live constituent count and must not be hard-coded to exactly 750 if the official file temporarily contains a different count. citeturn0search0turn0search1
+The Nifty Total Market is intended by NSE Indices to cover the broad Indian equity market across large, mid, small and microcap segments; the official index description states 750 stocks. The actual downloaded CSV is authoritative for the live constituent count and must not be hard-coded to exactly 750 if the official file temporarily contains a different count.
 
 - Repository path: `data/ind_niftytotalmarket_list.csv`
 - Symbols come from this CSV.
 - Use the CSV's `Industry` field exactly.
 - No F&O filtering.
 - Do not silently remap symbols or industries.
-- NSE CSV symbols are preserved exactly in the universe; `.NS` is added only when mapping an NSE symbol to Yahoo Finance.
+- NSE CSV symbols are preserved exactly in the source file; `.NS` is added only when mapping an NSE symbol to Yahoo Finance.
+- **Any symbol beginning with the literal prefix `DUMMY` is excluded from the analytical universe.** These are reserved for upcoming corporate-action processing and must not be acquired, ranked, staged, or included in research outputs.
+- The downloaded CSV remains unchanged as the official source snapshot; the `DUMMY` exclusion is applied at analytical ingestion.
 - The committed CSV is a versioned snapshot of the official source used by the application.
 
 ### Weekly universe refresh
@@ -30,7 +32,7 @@ GitHub Actions workflow: `.github/workflows/update_nse_universe.yml`
 - If it has changed, the workflow commits the refreshed CSV to `main`.
 - The workflow must fail rather than commit an empty, malformed, or unexpectedly tiny universe.
 
-The official Nifty Total Market index is reviewed semi-annually according to NSE Indices methodology, but the repository refreshes the source CSV weekly so the stored source remains current and auditable. citeturn0search0turn0search2
+The official Nifty Total Market index is reviewed semi-annually according to NSE Indices methodology, but the repository refreshes the source CSV weekly so the stored source remains current and auditable.
 
 ## Market Data
 
@@ -58,9 +60,9 @@ The production boundary is implemented by `build_decision_snapshot()` in `rs_sta
 
 The production sequence is:
 
-**Nifty Total Market CSV → yfinance symbol mapping → yfinance history → market-data validation → pre-market snapshot → quantitative calculations**
+**Nifty Total Market CSV → DUMMY exclusion → yfinance symbol mapping → yfinance history → market-data validation → pre-market snapshot → quantitative calculations**
 
-The acquisition layer fails closed: if any universe symbol cannot be acquired, the complete acquisition raises an error rather than silently producing a partial universe.
+The acquisition layer fails closed: if any non-DUMMY universe symbol cannot be acquired, the complete acquisition raises an error rather than silently producing a partial universe.
 
 ## Calendar Windows
 
@@ -86,7 +88,7 @@ Duplicate sessions are rejected. Timestamps are normalized to session dates only
 
 ## NSE CSV Ingestion
 
-`load_nse_constituents_csv()` requires `Symbol` and `Industry`, rejects missing values and duplicate symbols, and returns the supplied universe without filtering F&O or rewriting industries.
+`load_nse_constituents_csv()` requires `Symbol` and `Industry`, rejects missing values and duplicate symbols, trims surrounding whitespace, and excludes every symbol beginning with the literal `DUMMY` prefix. No F&O filtering or Industry rewriting is performed.
 
 ## Yahoo Finance Acquisition
 
@@ -110,12 +112,13 @@ The data/integration layer is tested independently for:
 6. Minimum-history requirements.
 7. Adjusted-price versus raw-volume handling.
 8. Nifty Total Market universe/Industry ingestion from the official CSV.
-9. Yahoo symbol mapping without changing the underlying NSE universe.
-10. Required market-column validation.
-11. yfinance acquisition parameters (`auto_adjust=True`, actions disabled, progress disabled).
-12. yfinance one-symbol MultiIndex normalization.
-13. Preservation of Close/High/Volume values through acquisition.
-14. Complete Nifty Total Market-universe-to-snapshot integration.
-15. Rejection when any universe symbol has no supplied market history.
-16. Fail-closed behaviour when any universe symbol's provider acquisition fails.
-17. Weekly refresh workflow validation before committing a new constituent snapshot.
+9. Exclusion of `DUMMY` corporate-action symbols.
+10. Yahoo symbol mapping without changing the underlying NSE universe.
+11. Required market-column validation.
+12. yfinance acquisition parameters (`auto_adjust=True`, actions disabled, progress disabled).
+13. yfinance one-symbol MultiIndex normalization.
+14. Preservation of Close/High/Volume values through acquisition.
+15. Complete Nifty Total Market-universe-to-snapshot integration.
+16. Rejection when any non-DUMMY universe symbol has no supplied market history.
+17. Fail-closed behaviour when any non-DUMMY universe symbol's provider acquisition fails.
+18. Weekly refresh workflow validation before committing a new constituent snapshot.
