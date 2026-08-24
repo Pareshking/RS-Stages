@@ -3,3 +3,4 @@ numpy
 yfinance
 pytest
 streamlit
+matplotlib
