@@ -1,0 +1,62 @@
+name: Update Nifty Total Market Universe
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 23:30 IST = 18:00 UTC, every Friday.
+    - cron: "0 18 * * 5"
+
+permissions:
+  contents: write
+
+jobs:
+  update-universe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download Nifty Total Market constituent CSV
+        env:
+          CSV_URL: https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          curl --fail --location --retry 3 --retry-delay 5 \
+            -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36' \
+            -H 'Referer: https://www.niftyindices.com/' \
+            -o data/ind_niftytotalmarket_list.csv \
+            "$CSV_URL"
+          test -s data/ind_niftytotalmarket_list.csv
+          head -n 3 data/ind_niftytotalmarket_list.csv
+
+      - name: Validate universe CSV
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          p = "data/ind_niftytotalmarket_list.csv"
+          df = pd.read_csv(p)
+          required = {"Symbol", "Industry"}
+          missing = required - set(df.columns)
+          if missing:
+              raise SystemExit(f"Missing required columns: {sorted(missing)}")
+          if df["Symbol"].isna().any() or df["Industry"].isna().any():
+              raise SystemExit("Universe contains missing Symbol/Industry values")
+          if df["Symbol"].duplicated().any():
+              raise SystemExit("Universe contains duplicate symbols")
+          if len(df) < 700:
+              raise SystemExit(f"Unexpectedly small Nifty Total Market universe: {len(df)}")
+          print(f"Validated {len(df)} Nifty Total Market constituents")
+          PY
+
+      - name: Commit refreshed universe
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/ind_niftytotalmarket_list.csv
+          if git diff --cached --quiet; then
+            echo 'No universe change.'
+            exit 0
+          fi
+          git commit -m 'data: refresh Nifty Total Market constituents'
+          git push
