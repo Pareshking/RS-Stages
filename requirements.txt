@@ -4,3 +4,7 @@ yfinance
 pytest
 streamlit
 matplotlib
+# PyArrow 25.0.0 has a native SIGSEGV when first imported on a short-lived
+# Streamlit script thread. Keep the known-safe 24.x line until the runtime
+# dependency chain no longer permits the upstream crash.
+pyarrow>=24,<25
