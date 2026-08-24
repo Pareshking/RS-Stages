@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -19,8 +18,7 @@ def independent_rs(close: pd.Series, decision: pd.Timestamp) -> dict[int, float]
     latest = float(s.loc[t])
     out = {}
     for m in (3, 6, 9, 12):
-        ref_date = t - pd.DateOffset(months=m)
-        ref = calendar_asof(s.index, ref_date)
+        ref = calendar_asof(s.index, t - pd.DateOffset(months=m))
         out[m] = latest / float(s.loc[ref]) - 1.0
     return out
 
@@ -36,17 +34,12 @@ def main() -> None:
 
     decision = pd.Timestamp(args.decision_date)
     universe = pd.read_csv(args.universe)
-    result = analyze_universe(
-        acquire_and_build_universe_snapshots(
-            args.universe, args.start, args.end, decision
-        ).snapshots
-    )
-
-    # Independent RS reconciliation for every stock with sufficient history.
-    failures = []
     snapshots = acquire_and_build_universe_snapshots(
         args.universe, args.start, args.end, decision
     ).snapshots
+    result = analyze_universe(snapshots)
+
+    failures = []
     for symbol, snap in snapshots.items():
         try:
             expected = independent_rs(snap.data["Close"], snap.latest_completed_session)
@@ -57,7 +50,6 @@ def main() -> None:
             if not np.isclose(rs_blend(expected), rs_blend(actual), rtol=0, atol=1e-12):
                 failures.append(f"{symbol}: RS blend mismatch")
         except ValueError:
-            # Insufficient history is a data-availability outcome, not a calculation failure.
             continue
 
     result = result.join(universe.set_index("Symbol"), how="left", rsuffix="_NSE")
