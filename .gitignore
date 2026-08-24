@@ -1,3 +1,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Generated price panel: published as a rolling release asset, never committed.
+# It is a regenerated binary Git cannot delta, so committing it would add a fresh
+# ~0.9 MB blob to history on every audit run, permanently.
+data/price_panel.npz

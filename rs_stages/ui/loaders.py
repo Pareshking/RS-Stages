@@ -7,9 +7,14 @@ notice instead of a plausible-looking number.
 """
 from __future__ import annotations
 
+import io
+import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..actions import with_actions
@@ -18,7 +23,16 @@ DATA_DIR = Path("data")
 RESEARCH_PATH = DATA_DIR / "latest_research.csv"
 PREVIOUS_PATH = DATA_DIR / "previous_research.csv"
 UNIVERSE_PATH = DATA_DIR / "ind_niftytotalmarket_list.csv"
-PANEL_PATH = DATA_DIR / "price_panel.parquet"
+PANEL_PATH = DATA_DIR / "price_panel.npz"
+
+#: The price panel is published as a release asset rather than committed: it is
+#: a regenerated binary that Git cannot delta, so committing it would add a
+#: fresh ~1.4 MB blob to history on every audit run, permanently.
+PANEL_URL = os.environ.get(
+    "RS_STAGES_PANEL_URL",
+    "https://github.com/Pareshking/RS-Stages/releases/download/data-latest/price_panel.npz",
+)
+PANEL_TIMEOUT_SECONDS = 30
 BREADTH_PATH = DATA_DIR / "breadth_history.csv"
 
 #: Fields introduced by locked-spec v2.1. A snapshot published before that
@@ -38,7 +52,6 @@ class Snapshot:
     research: pd.DataFrame
     universe: pd.DataFrame
     previous: pd.DataFrame | None = None
-    panel: pd.DataFrame | None = None
     breadth: pd.DataFrame | None = None
     missing: dict[str, str] = field(default_factory=dict)
 
@@ -56,27 +69,6 @@ class Snapshot:
 
     def has(self, *columns: str) -> bool:
         return all(column in self.research.columns for column in columns)
-
-    def trend_windows(self, sessions: int = 63) -> dict[str, list[float]]:
-        """Short close series per symbol for the sparkline column."""
-        if self.panel is None or self.panel.empty:
-            return {}
-        panel = self.panel.sort_values(["Symbol", "Date"])
-        return {
-            str(symbol): group["Close"].tail(sessions).astype(float).tolist()
-            for symbol, group in panel.groupby("Symbol", observed=True)
-        }
-
-    def symbol_history(self, symbol: str) -> pd.Series | None:
-        """Full retained close series for one symbol, indexed by session."""
-        if self.panel is None or self.panel.empty:
-            return None
-        rows = self.panel[self.panel["Symbol"].astype(str) == str(symbol)]
-        if rows.empty:
-            return None
-        series = rows.set_index("Date")["Close"].astype(float).sort_index()
-        series.index = pd.DatetimeIndex(series.index)
-        return series
 
 
 def _read_research(path: Path, universe: pd.DataFrame) -> pd.DataFrame:
@@ -102,6 +94,112 @@ def _read_research(path: Path, universe: pd.DataFrame) -> pd.DataFrame:
     # Action is recomputed from the published columns with the same deterministic
     # function the audit used, so the table and the snapshot cannot disagree.
     return with_actions(merged)
+
+
+@dataclass(frozen=True)
+class PricePanel:
+    """Completed-session closes as a dense sessions x symbols grid.
+
+    Every symbol shares the same session calendar, so the panel is a matrix
+    rather than a long table. Reading it needs NumPy only — no Arrow runtime is
+    involved in drawing a chart.
+    """
+
+    dates: pd.DatetimeIndex
+    symbols: tuple[str, ...]
+    close: "np.ndarray"
+
+    def series(self, symbol: str) -> pd.Series | None:
+        """Close series for one symbol, or None if it is not in the panel."""
+        try:
+            column = self.symbols.index(str(symbol))
+        except ValueError:
+            return None
+        values = self.close[:, column]
+        series = pd.Series(values, index=self.dates, dtype="float64").dropna()
+        return series if not series.empty else None
+
+    def tails(self, sessions: int) -> dict[str, list[float]]:
+        """Trailing closes per symbol, for the sparkline column."""
+        window = self.close[-sessions:, :]
+        out: dict[str, list[float]] = {}
+        for column, symbol in enumerate(self.symbols):
+            values = window[:, column]
+            values = values[~np.isnan(values)]
+            if len(values) >= 2:
+                out[symbol] = values.tolist()
+        return out
+
+    @property
+    def terminal_session(self) -> pd.Timestamp | None:
+        return None if len(self.dates) == 0 else pd.Timestamp(self.dates[-1])
+
+
+def _read_panel(source) -> PricePanel:
+    with np.load(source, allow_pickle=False) as payload:
+        return PricePanel(
+            dates=pd.DatetimeIndex(payload["dates"]),
+            symbols=tuple(str(s) for s in payload["symbols"]),
+            close=payload["close"],
+        )
+
+
+def load_price_panel() -> tuple[PricePanel | None, str | None]:
+    """Return the price panel, or None plus the reason it is unavailable.
+
+    A local file wins when present, so a developer can work from a panel they
+    generated themselves and the app needs no network in that case. Otherwise
+    the published release asset is downloaded. Nothing is fabricated when both
+    fail: the caller renders an explicit notice.
+
+    This is deliberately separate from :func:`load_snapshot`. The panel is by
+    far the largest artifact, and the pages that do not draw price history must
+    never pay to load it.
+    """
+    if PANEL_PATH.exists():
+        try:
+            return _read_panel(PANEL_PATH), None
+        except (OSError, ValueError, KeyError) as exc:
+            return None, f"The local price panel could not be read ({type(exc).__name__})."
+
+    if not PANEL_URL:
+        return None, "No price panel is available and no panel URL is configured."
+
+    try:
+        with urllib.request.urlopen(PANEL_URL, timeout=PANEL_TIMEOUT_SECONDS) as response:
+            payload = response.read()
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return None, (
+            f"The published price panel could not be downloaded ({type(exc).__name__}), so "
+            "price history, trend lines and sparklines are unavailable. Everything else on "
+            "this page comes from the committed snapshot and is unaffected."
+        )
+
+    try:
+        return _read_panel(io.BytesIO(payload)), None
+    except (OSError, ValueError, KeyError) as exc:
+        return None, f"The downloaded price panel could not be read ({type(exc).__name__})."
+
+
+def panel_matches(panel: PricePanel, research: pd.DataFrame) -> str | None:
+    """Return a reason string when the panel disagrees with the snapshot.
+
+    The panel and the snapshot are published to different places, so they can
+    drift. A panel from a different decision date is rejected rather than drawn:
+    a chart and a table must never describe different sessions.
+    """
+    decision = pd.to_datetime(research["Date"], errors="coerce").max()
+    terminal = panel.terminal_session
+    if pd.isna(decision) or terminal is None:
+        return None
+    if terminal.normalize() == pd.Timestamp(decision).normalize():
+        return None
+    return (
+        f"The published price panel ends at {terminal:%d %b %Y} but this snapshot's decision "
+        f"date is {pd.Timestamp(decision):%d %b %Y}. Price history is withheld rather than "
+        "drawn against a different session. Re-run the Real Data Research Audit so both are "
+        "published from the same run."
+    )
 
 
 def load_snapshot() -> Snapshot:
@@ -132,21 +230,6 @@ def load_snapshot() -> Snapshot:
             "cannot be computed. " + REGENERATE_HINT
         )
 
-    panel = None
-    if PANEL_PATH.exists():
-        try:
-            panel = pd.read_parquet(PANEL_PATH)
-            panel["Date"] = pd.to_datetime(panel["Date"], errors="coerce")
-            panel = panel.dropna(subset=["Date"])
-        except (OSError, ValueError, ImportError) as exc:
-            missing["panel"] = f"The price panel could not be read ({type(exc).__name__})."
-            panel = None
-    else:
-        missing["panel"] = (
-            "No price panel has been published, so price history, trend lines and "
-            "sparklines are unavailable. " + REGENERATE_HINT
-        )
-
     breadth = None
     if BREADTH_PATH.exists():
         try:
@@ -166,7 +249,6 @@ def load_snapshot() -> Snapshot:
         research=research,
         universe=universe,
         previous=previous,
-        panel=panel,
         breadth=breadth,
         missing=missing,
     )

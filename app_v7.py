@@ -26,7 +26,7 @@ from rs_stages.screener import TREND_HEALTH_CONDITIONS
 from rs_stages.ui import charts
 from rs_stages.ui import components as ui
 from rs_stages.ui import theme
-from rs_stages.ui.loaders import load_snapshot
+from rs_stages.ui.loaders import load_price_panel, load_snapshot, panel_matches
 from rs_stages.ui.theme import (
     CAUTION,
     NEGATIVE,
@@ -70,7 +70,32 @@ def write(markup: str) -> None:
 
 @st.cache_data(ttl=1800, show_spinner="Reading the validated snapshot…")
 def cached_snapshot():
+    """The committed snapshot. Small enough to serialise on every rerun."""
     return load_snapshot()
+
+
+@st.cache_resource(show_spinner="Loading price history…")
+def cached_panel():
+    """The price panel, loaded once and held by reference.
+
+    Deliberately cache_resource, not cache_data: cache_data serialises its value
+    on every rerun, and the panel is by far the largest artifact. It is also
+    loaded lazily — only the two views that draw price history ask for it, so a
+    problem reading it degrades those two rather than the whole terminal.
+    """
+    panel, error = load_price_panel()
+    if panel is not None:
+        mismatch = panel_matches(panel, cached_snapshot().research)
+        if mismatch:
+            return None, mismatch
+    return panel, error
+
+
+@st.cache_resource(show_spinner=False)
+def cached_sparklines(sessions: int = 63):
+    """Trailing closes per symbol for the sparkline column."""
+    panel, _ = cached_panel()
+    return {} if panel is None else panel.tails(sessions)
 
 
 SNAP = cached_snapshot()
@@ -131,7 +156,7 @@ def heading(title: str, subtitle: str) -> None:
 
 def missing(key: str) -> bool:
     """Render the explicit unavailability notice for an artifact, if missing."""
-    detail = SNAP.missing.get(key)
+    detail = cached_panel()[1] if key == "panel" else SNAP.missing.get(key)
     if not detail:
         return False
     titles = {
@@ -454,8 +479,8 @@ def page_screener() -> None:
         f"stocks · sorted by {ui.esc(sort_label.lower())} · Action is the guide interpretation of the "
         "evidence to its left, never a substitute for it.</div>"
     )
-    write(ui.screener_table(window, SNAP.trend_windows(), sorted_by=sort_key))
-    if SNAP.panel is None:
+    write(ui.screener_table(window, cached_sparklines(), sorted_by=sort_key))
+    if cached_panel()[0] is None:
         st.write("")
         missing("panel")
 
@@ -885,7 +910,8 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
     using the same locked functions the audit used, so a drawn line can never
     drift from the definition it claims to show.
     """
-    history = SNAP.symbol_history(symbol)
+    panel = cached_panel()[0]
+    history = None if panel is None else panel.series(symbol)
     if history is None or len(history) < 40:
         missing("panel")
         return
@@ -1046,7 +1072,7 @@ def page_methodology() -> None:
             "stages": BREADTH["stages"],
             "above_30_week_pct": round(float(BREADTH["pct_above_ma_30w"]), 2),
             "confirmed_breakouts": int(BREADTH["breakout_confirmed"]),
-            "price_panel_available": SNAP.panel is not None,
+            "price_panel_available": cached_panel()[0] is not None,
             "breadth_history_sessions": 0 if SNAP.breadth is None else int(len(SNAP.breadth)),
             "unavailable": SNAP.missing,
         }

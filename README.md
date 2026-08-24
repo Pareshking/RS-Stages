@@ -43,10 +43,15 @@ Locked methodology includes calendar-date RS lookbacks, a 30-calendar-week MA, a
 ## Published Artifacts
 
 The Real Data Research Audit workflow publishes `data/latest_research.csv`,
-`data/previous_research.csv`, `data/price_panel.parquet` and
-`data/breadth_history.csv`. The UI reads these and nothing else; when one is
-absent the affected section says so explicitly rather than showing a
-substitute value.
+`data/previous_research.csv` and `data/breadth_history.csv` to the repository,
+and `price_panel.npz` as a rolling **release asset** on the `data-latest` tag.
+
+The panel is not committed on purpose: it is a regenerated binary that Git
+cannot delta, so committing it would add ~1.4 MB of permanent history per run.
+Replacing a single release asset keeps exactly one copy and adds nothing to the
+repository. The UI reads these artifacts and nothing else; when one is absent
+the affected section says so explicitly rather than showing a substitute
+value.
 
 All signals respect the pre-market information boundary: the latest completed NSE session is the terminal information date for the upcoming decision session.
 

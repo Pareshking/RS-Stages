@@ -4,4 +4,3 @@ yfinance
 pytest
 streamlit
 matplotlib
-pyarrow

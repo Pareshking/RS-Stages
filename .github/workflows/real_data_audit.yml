@@ -19,6 +19,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # Rolling tag whose single asset is replaced on every run. Deliberately not a
+  # source release: it carries generated data, never code.
+  DATA_TAG: data-latest
+
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -47,18 +52,35 @@ jobs:
             --end '${{ inputs.end_date }}' \
             --output data/latest_research.csv
 
+      # The price panel is published as a release asset, never committed. It is a
+      # regenerated binary that Git cannot delta, so committing it would add a
+      # fresh ~1.4 MB blob to history on every run, permanently. Replacing a
+      # single asset keeps exactly one copy and adds nothing to the repository.
+      - name: Publish price panel as a release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$DATA_TAG" >/dev/null 2>&1; then
+            gh release create "$DATA_TAG" \
+              --title "Latest research price panel" \
+              --notes "Rolling price panel for the RS-Stages terminal. Replaced by each Real Data Research Audit run; not a source release." \
+              --latest=false
+          fi
+          gh release upload "$DATA_TAG" data/price_panel.parquet --clobber
+          echo "Published $(du -h data/price_panel.parquet | cut -f1) panel to release $DATA_TAG"
+
       - name: Publish validated research snapshot
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest_research.csv \
                   data/previous_research.csv \
-                  data/price_panel.parquet \
                   data/breadth_history.csv
           if git diff --cached --quiet; then
             echo "Validated research snapshot unchanged."
           else
-            git commit -m "data: publish validated research snapshot and price panel"
+            git commit -m "data: publish validated research snapshot"
             git push
           fi
 

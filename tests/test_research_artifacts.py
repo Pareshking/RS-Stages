@@ -68,30 +68,47 @@ def test_previous_snapshot_never_sees_the_current_session(artifacts):
         assert previous_date < current_date <= snap.data.index.max()
 
 
-def test_price_panel_round_trips_through_parquet_without_losing_alignment(artifacts, tmp_path):
-    trends = artifacts["trends"]
-    panel = pd.concat(
-        [
-            frame[["Close"]].assign(Symbol=symbol).rename_axis("Date").reset_index()
-            for symbol, frame in trends.items()
-        ],
-        ignore_index=True,
-    )
-    panel["Close"] = panel["Close"].astype("float32")
-    panel["Symbol"] = panel["Symbol"].astype("category")
-    path = tmp_path / "price_panel.parquet"
-    panel[["Date", "Symbol", "Close"]].sort_values(["Symbol", "Date"]).to_parquet(path, index=False)
+def test_price_panel_round_trips_as_a_numpy_grid(artifacts, tmp_path):
+    """The panel is a dense grid readable with NumPy alone — no Arrow runtime."""
+    import numpy as np
 
-    reloaded = pd.read_parquet(path)
-    assert set(reloaded["Symbol"].astype(str)) == set(trends)
+    from rs_stages.ui.loaders import PricePanel, _read_panel
+
+    trends = artifacts["trends"]
+    symbols = sorted(trends)
+    sessions = np.array(sorted({s for f in trends.values() for s in f.index}))
+    closes = np.full((len(sessions), len(symbols)), np.nan, dtype="float32")
+    position = {stamp: i for i, stamp in enumerate(sessions)}
+    for column, symbol in enumerate(symbols):
+        frame = trends[symbol]
+        rows = np.fromiter((position[s] for s in frame.index), dtype=np.intp, count=len(frame))
+        closes[rows, column] = frame["Close"].to_numpy(dtype="float32")
+
+    path = tmp_path / "price_panel.npz"
+    np.savez_compressed(
+        path,
+        close=closes,
+        symbols=np.array(symbols, dtype="U32"),
+        dates=pd.DatetimeIndex(sessions).to_numpy().astype("datetime64[D]"),
+    )
+
+    panel = _read_panel(path)
+    assert isinstance(panel, PricePanel)
+    assert set(panel.symbols) == set(trends)
     for symbol in trends:
-        stored = reloaded[reloaded["Symbol"].astype(str) == symbol].set_index("Date")["Close"]
-        assert stored.index.max() == artifacts["current"].loc[symbol, "Date"]
+        series = panel.series(symbol)
+        assert series is not None
+        assert series.index.max() == artifacts["current"].loc[symbol, "Date"]
         # float32 storage: the panel is a drawing input, so single precision is
         # acceptable, but it must still round-trip to the snapshot's close.
         assert np.isclose(
-            float(stored.iloc[-1]), float(artifacts["current"].loc[symbol, "Close"]), rtol=1e-6, atol=0
+            float(series.iloc[-1]), float(artifacts["current"].loc[symbol, "Close"]),
+            rtol=1e-6, atol=0,
         )
+    assert panel.series("NOT-A-SYMBOL") is None
+    tails = panel.tails(20)
+    assert set(tails) == set(trends)
+    assert all(len(v) == 20 for v in tails.values())
 
 
 def test_moving_averages_recomputed_from_the_panel_match_the_snapshot(artifacts):

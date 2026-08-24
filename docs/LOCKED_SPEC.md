@@ -285,7 +285,7 @@ decision dates, publishing:
 | --- | --- |
 | `data/latest_research.csv` | The snapshot at decision date D (latest completed session T). |
 | `data/previous_research.csv` | The same pipeline with the boundary moved back one completed session (latest completed T-1). |
-| `data/price_panel.parquet` | `Date, Symbol, Close` (float32) for the trailing 420 sessions per symbol. |
+| `price_panel.npz` | A dense sessions x symbols grid of `Close` (float32) for the trailing 420 sessions, plus the session calendar and symbol list. **Published as a rolling release asset, never committed.** |
 | `data/breadth_history.csv` | Point-in-time participation counts for the trailing 120 sessions. |
 
 Constraints:
@@ -301,9 +301,23 @@ Constraints:
   uses only moving averages evaluated at that session, so the series carries no
   look-ahead. Symbols without a valid average at a session are excluded from
   both that session's numerator and its denominator.
-- The panel is committed on every audit run. Repository growth is a known cost
-  of publishing reproducible price history; the panel is float32 and Close-only
-  specifically to bound it.
+- The panel is **never committed**. It is a regenerated binary that changes
+  completely each run, so Git cannot delta it: measured cost is 1.43 MB of
+  permanent history per run if committed, against 0 MB as a replaced release
+  asset. It is published to the rolling `data-latest` release tag, whose single
+  asset is overwritten every run.
+- The panel is stored as a compressed NumPy grid rather than Parquet. Every
+  symbol shares the same completed-session calendar, so a dense matrix is both
+  smaller (measured 0.88 MB against 1.39 MB) and readable with NumPy alone. The
+  presentation layer therefore requires no Arrow runtime to draw a chart.
+- Because the panel and the committed snapshot are published to different
+  places, they can drift. The audit refuses to publish a panel whose terminal
+  session disagrees with the snapshot's decision date, and the presentation
+  layer withholds a mismatched panel rather than drawing it. A chart and a table
+  must never describe different sessions.
+- The panel is loaded lazily and held by reference, never serialised into the
+  snapshot cache. Only the two views that draw price history load it, so a
+  failure to read it degrades those two rather than the whole terminal.
 
 ## 13. Liquidity
 
