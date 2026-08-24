@@ -1,8 +1,12 @@
+import sys
+import types
+
 import pandas as pd
 import pytest
 
 from rs_stages.data import (
     build_decision_snapshot,
+    download_yfinance_history,
     latest_completed_session,
     load_nse_constituents_csv,
     normalize_session_index,
@@ -63,6 +67,60 @@ def test_yfinance_adjustment_policy_is_locked():
 def test_yfinance_symbol_maps_nse_csv_symbol_only_for_provider():
     assert yfinance_symbol("RELIANCE") == "RELIANCE.NS"
     assert yfinance_symbol("RELIANCE.NS") == "RELIANCE.NS"
+
+
+def test_download_yfinance_history_uses_locked_policy_and_preserves_ohlcv(monkeypatch):
+    calls = {}
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
+    source = pd.DataFrame(
+        {"Close": [110.0, 112.0], "High": [115.0, 118.0], "Volume": [1000, 1200]},
+        index=idx,
+    )
+
+    fake_yf = types.SimpleNamespace()
+
+    def fake_download(ticker, **kwargs):
+        calls["ticker"] = ticker
+        calls["kwargs"] = kwargs
+        return source.copy()
+
+    fake_yf.download = fake_download
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    got = download_yfinance_history("ABC", "2026-08-01", "2026-08-24")
+
+    assert calls["ticker"] == "ABC.NS"
+    assert calls["kwargs"]["auto_adjust"] is True
+    assert calls["kwargs"]["actions"] is False
+    assert calls["kwargs"]["progress"] is False
+    pd.testing.assert_series_equal(got["Close"], source["Close"])
+    pd.testing.assert_series_equal(got["High"], source["High"])
+    pd.testing.assert_series_equal(got["Volume"], source["Volume"])
+
+
+def test_download_yfinance_history_collapses_symbol_level_multiindex(monkeypatch):
+    ticker = "ABC.NS"
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
+    columns = pd.MultiIndex.from_tuples(
+        [("Close", ticker), ("High", ticker), ("Volume", ticker)]
+    )
+    source = pd.DataFrame([[110.0, 115.0, 1000], [112.0, 118.0, 1200]], index=idx, columns=columns)
+    fake_yf = types.SimpleNamespace(download=lambda *args, **kwargs: source.copy())
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    got = download_yfinance_history("ABC", "2026-08-01", "2026-08-24")
+    assert list(got.columns) == ["Close", "High", "Volume"]
+    assert got.loc[pd.Timestamp("2026-08-21"), "Volume"] == 1200
+
+
+def test_download_yfinance_history_rejects_missing_required_column(monkeypatch):
+    idx = pd.DatetimeIndex(["2026-08-20"])
+    source = pd.DataFrame({"Close": [110.0], "High": [115.0]}, index=idx)
+    fake_yf = types.SimpleNamespace(download=lambda *args, **kwargs: source.copy())
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    with pytest.raises(ValueError, match="Missing required market columns"):
+        download_yfinance_history("ABC", "2026-08-01", "2026-08-24")
 
 
 def test_nse_csv_ingestion_preserves_symbols_and_industry(tmp_path):
