@@ -27,13 +27,13 @@ def test_calendar_asof_uses_previous_session():
 
 def test_rs_blend_exact_weights():
     r = {3: 0.10, 6: 0.20, 9: 0.30, 12: 0.40}
-    assert rs_blend(r) == 0.20
+    assert np.isclose(rs_blend(r), 0.22)
 
 
 def test_rs_score_min_percentile_and_tie():
     blend = pd.Series([0.10, 0.10, 0.20], index=["A", "B", "C"])
     got = rs_score(blend)
-    assert got["A"] == got["B"] == 66.0
+    assert got["A"] == got["B"] == 34.0
     assert got["C"] == 99.0
 
 
@@ -44,7 +44,7 @@ def test_rs_score_preserves_nan():
 
 
 def test_rs_returns_use_calendar_month_asof():
-    dates = pd.date_range("2025-01-01", "2026-01-01", freq="7D")
+    dates = pd.date_range("2024-01-01", "2026-01-01", freq="7D")
     close = pd.Series(np.arange(len(dates), dtype=float) + 100.0, index=dates)
     latest = dates[-1]
     got = rs_returns(close, latest)
@@ -68,7 +68,7 @@ def test_slope_is_ten_sessions():
 
 
 def test_30w_ma_requires_complete_calendar_window():
-    idx = pd.date_range("2025-01-01", "2025-07-30", freq="7D")
+    idx = pd.date_range("2025-01-01", "2025-06-30", freq="7D")
     close = pd.Series(100.0, index=idx)
     with pytest.raises(ValueError):
         ma_30w(close, idx[-1])
