@@ -13,10 +13,8 @@ RS-Stages' own, as specified in docs/LOCKED_SPEC.md.
 from __future__ import annotations
 
 import html
-import json
 import math
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -25,13 +23,13 @@ from rs_stages.market import breadth_snapshot, industry_leadership
 from rs_stages.movers import rs_movers, transitions
 from rs_stages.quant import ma_10w_series, ma_30w_series
 from rs_stages.screener import TREND_HEALTH_CONDITIONS
+from rs_stages.ui import charts
 from rs_stages.ui import components as ui
 from rs_stages.ui import theme
 from rs_stages.ui.loaders import load_snapshot
 from rs_stages.ui.theme import (
     CAUTION,
     NEGATIVE,
-    NEUTRAL,
     POSITIVE,
     fmt_date,
     fmt_inr,
@@ -571,37 +569,17 @@ def page_market() -> None:
 
 
 def _line_chart(series_30w: list[dict], series_10w: list[dict]) -> None:
-    """Breadth trend via TradingView Lightweight Charts."""
-    payload = json.dumps({"a": series_30w, "b": series_10w})
+    """Participation trend: share above the 30-week and 10-week lines."""
     components.html(
-        f"""
-<div id="breadth" style="height:230px;background:#fff;border:1px solid #eef0f3;border-radius:14px"></div>
-<script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
-<script>
-const d = {payload};
-const el = document.getElementById('breadth');
-if (window.LightweightCharts && el) {{
-  const chart = LightweightCharts.createChart(el, {{
-    autoSize:true,
-    layout:{{background:{{type:'solid',color:'#ffffff'}},textColor:'#6b7280',
-      fontFamily:'Plus Jakarta Sans,system-ui,sans-serif',fontSize:11}},
-    grid:{{vertLines:{{color:'#f6f7f9'}},horzLines:{{color:'#f6f7f9'}}}},
-    rightPriceScale:{{borderColor:'#eef0f3'}},
-    timeScale:{{borderColor:'#eef0f3'}},
-    crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}}
-  }});
-  const a = chart.addSeries(LightweightCharts.LineSeries,{{color:'#2D6CDF',lineWidth:2,priceLineVisible:false}});
-  a.setData(d.a);
-  if (d.b.length) {{
-    const b = chart.addSeries(LightweightCharts.LineSeries,{{color:'#9DBDF0',lineWidth:2,priceLineVisible:false}});
-    b.setData(d.b);
-  }}
-  chart.timeScale().fitContent();
-}} else if (el) {{
-  el.innerHTML = '<div style="padding:16px;font:13px Plus Jakarta Sans,sans-serif;color:#6b7280">'
-    + 'The charting library could not be loaded in this environment.</div>';
-}}
-</script>""",
+        charts.line_chart(
+            [
+                {"data": series_30w, "color": "#2D6CDF", "last_value": True},
+                {"data": series_10w, "color": "#9DBDF0"},
+            ],
+            element_id="breadth",
+            height=230,
+            unavailable="The participation trend could not be drawn in this environment.",
+        ),
         height=246,
         scrolling=False,
     )
@@ -626,8 +604,10 @@ def page_movers() -> None:
         write(ui.card('<div class="ws-note">Nothing changed state between the two sessions.</div>'))
         return
 
+    # Group labels carry our locked Stage vocabulary; they are not lower-cased,
+    # because "stage 2 — advancing" is not the name of anything in this system.
     parts = [
-        f'<b class="num">{len(payload["rows"])}</b> {ui.esc(label.lower())}'
+        f'<b class="num">{len(payload["rows"])}</b> {ui.esc(label)}'
         for label, payload in groups.items()
     ]
     write(
@@ -912,13 +892,7 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
     frame = pd.DataFrame(
         {"Close": history, "MA_10W": ma_10w_series(history), "MA_30W": ma_30w_series(history)}
     ).tail(260)
-    payload = json.dumps(
-        {
-            "close": [{"time": p["time"], "value": p["Close"]} for p in ui.price_chart_payload(frame) if "Close" in p],
-            "ma10": [{"time": p["time"], "value": p["MA_10W"]} for p in ui.price_chart_payload(frame) if "MA_10W" in p],
-            "ma30": [{"time": p["time"], "value": p["MA_30W"]} for p in ui.price_chart_payload(frame) if "MA_30W" in p],
-        }
-    )
+    points = ui.price_chart_payload(frame)
     write(
         ui.card(
             '<div class="ws-legend" style="margin-bottom:2px">'
@@ -934,34 +908,27 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
         )
     )
     components.html(
-        f"""
-<div id="price" style="height:340px;background:#fff;border:1px solid #eef0f3;border-radius:14px"></div>
-<script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
-<script>
-const d = {payload};
-const el = document.getElementById('price');
-if (window.LightweightCharts && el) {{
-  const chart = LightweightCharts.createChart(el, {{
-    autoSize:true,
-    layout:{{background:{{type:'solid',color:'#ffffff'}},textColor:'#6b7280',
-      fontFamily:'Plus Jakarta Sans,system-ui,sans-serif',fontSize:11}},
-    grid:{{vertLines:{{color:'#f6f7f9'}},horzLines:{{color:'#f6f7f9'}}}},
-    rightPriceScale:{{borderColor:'#eef0f3'}},
-    timeScale:{{borderColor:'#eef0f3',rightOffset:3}},
-    crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}}
-  }});
-  chart.addSeries(LightweightCharts.LineSeries,
-    {{color:'#1a1d21',lineWidth:2,priceLineVisible:false}}).setData(d.close);
-  chart.addSeries(LightweightCharts.LineSeries,
-    {{color:'#9DBDF0',lineWidth:2,priceLineVisible:false,lastValueVisible:false}}).setData(d.ma10);
-  chart.addSeries(LightweightCharts.LineSeries,
-    {{color:'#2D6CDF',lineWidth:2,lineStyle:2,priceLineVisible:false,lastValueVisible:false}}).setData(d.ma30);
-  chart.timeScale().fitContent();
-}} else if (el) {{
-  el.innerHTML = '<div style="padding:16px;font:13px Plus Jakarta Sans,sans-serif;color:#6b7280">'
-    + 'The charting library could not be loaded in this environment.</div>';
-}}
-</script>""",
+        charts.line_chart(
+            [
+                {
+                    "data": [{"time": p["time"], "value": p["Close"]} for p in points if "Close" in p],
+                    "color": "#1a1d21",
+                    "last_value": True,
+                },
+                {
+                    "data": [{"time": p["time"], "value": p["MA_10W"]} for p in points if "MA_10W" in p],
+                    "color": "#9DBDF0",
+                },
+                {
+                    "data": [{"time": p["time"], "value": p["MA_30W"]} for p in points if "MA_30W" in p],
+                    "color": "#2D6CDF",
+                    "dashed": True,
+                },
+            ],
+            element_id="price",
+            height=340,
+            unavailable="The price chart could not be drawn in this environment.",
+        ),
         height=356,
         scrolling=False,
     )
