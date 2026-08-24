@@ -16,9 +16,9 @@ def test_latest_completed_session_excludes_future_session():
     assert latest_completed_session(idx, pd.Timestamp("2026-08-22")) == pd.Timestamp("2026-08-21")
 
 
-def test_latest_completed_session_allows_same_completed_date():
-    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
-    assert latest_completed_session(idx, pd.Timestamp("2026-08-21")) == pd.Timestamp("2026-08-21")
+def test_latest_completed_session_excludes_decision_session_even_if_provider_has_it():
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21", "2026-08-24"])
+    assert latest_completed_session(idx, pd.Timestamp("2026-08-24")) == pd.Timestamp("2026-08-21")
 
 
 def test_normalize_rejects_duplicate_sessions():
@@ -39,6 +39,14 @@ def test_snapshot_contains_only_completed_information():
     snap = build_decision_snapshot(data, pd.Timestamp("2026-08-23"))
     assert snap.latest_completed_session == pd.Timestamp("2026-08-22")
     assert list(snap.data["Close"]) == [100, 101, 102]
+
+
+def test_snapshot_excludes_decision_session_when_present():
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21", "2026-08-24"])
+    data = pd.DataFrame({"Close": [100, 101, 999]}, index=idx)
+    snap = build_decision_snapshot(data, pd.Timestamp("2026-08-24"))
+    assert snap.latest_completed_session == pd.Timestamp("2026-08-21")
+    assert list(snap.data["Close"]) == [100, 101]
 
 
 def test_validate_market_columns():
