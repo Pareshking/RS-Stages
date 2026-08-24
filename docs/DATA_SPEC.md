@@ -32,15 +32,13 @@ The production boundary is implemented by `build_decision_snapshot()` in `rs_sta
 
 `build_universe_snapshots()` in `rs_stages/pipeline.py` is the deterministic integration boundary between the NSE universe and market histories.
 
-The pipeline:
+`acquire_universe_histories()` now connects that universe directly to the yfinance acquisition function. `acquire_and_build_universe_snapshots()` then passes the complete acquired set through the pre-market boundary.
 
-1. Loads the NSE CSV without changing `Symbol` or `Industry`.
-2. Requires market history for every universe symbol; it does not silently drop missing symbols.
-3. Builds a separate pre-market `DecisionSnapshot` for every symbol.
-4. Returns the original constituent table plus the permitted snapshot dictionary.
-5. Does not calculate signals directly from raw provider history.
+The production sequence is:
 
-This layer deliberately stops before signal calculation. Quantitative functions must consume the returned snapshots so the information-set boundary cannot be bypassed accidentally.
+**NSE CSV → yfinance symbol mapping → yfinance history → market-data validation → pre-market snapshot → quantitative calculations**
+
+The acquisition layer fails closed: if any NSE universe symbol cannot be acquired, the complete acquisition raises an error rather than silently producing a partial universe.
 
 ## Calendar Windows
 
@@ -72,6 +70,10 @@ Duplicate sessions are rejected. Timestamps are normalized to session dates only
 
 `yfinance_symbol()` maps an NSE CSV symbol to `<SYMBOL>.NS` for Yahoo Finance only. `download_yfinance_history()` uses `auto_adjust=True`, disables actions, rejects empty results, normalizes the session index, and requires `Close`, `High`, and `Volume`.
 
+When yfinance returns a one-symbol MultiIndex, the acquisition layer removes only the symbol level. It does not transform OHLCV values.
+
+`auto_adjust=True` is the locked price policy: returned `Close` and `High` are consumed as adjusted price fields. `Volume` is preserved as the provider's raw share-volume field. The tests explicitly verify that the acquisition function does not numerically alter these three fields.
+
 Acquisition and decision-boundary enforcement are separate: downloaded data must pass through `build_decision_snapshot()` before any signal calculation.
 
 ## Validation
@@ -88,5 +90,9 @@ The data/integration layer is tested independently for:
 8. Universe/Industry ingestion from the NSE CSV.
 9. Yahoo symbol mapping without changing the underlying NSE universe.
 10. Required market-column validation.
-11. Complete NSE-universe-to-snapshot integration.
-12. Rejection when any universe symbol has no supplied market history.
+11. yfinance acquisition parameters (`auto_adjust=True`, actions disabled, progress disabled).
+12. yfinance one-symbol MultiIndex normalization.
+13. Preservation of Close/High/Volume values through acquisition.
+14. Complete NSE-universe-to-snapshot integration.
+15. Rejection when any universe symbol has no supplied market history.
+16. Fail-closed behaviour when any universe symbol's provider acquisition fails.
