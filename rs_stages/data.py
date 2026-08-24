@@ -106,6 +106,22 @@ def yfinance_history_kwargs() -> dict[str, bool]:
     return {"auto_adjust": True}
 
 
+def _extract_bulk_ticker_frame(frame: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Extract one ticker from a yfinance bulk response without altering fields."""
+    if not isinstance(frame.columns, pd.MultiIndex):
+        raise ValueError("Bulk yfinance response did not return ticker-level columns")
+
+    for level in range(frame.columns.nlevels):
+        values = frame.columns.get_level_values(level)
+        if ticker in values:
+            out = frame.xs(ticker, axis=1, level=level, drop_level=True)
+            if isinstance(out.columns, pd.MultiIndex):
+                # A two-level provider response should collapse to OHLCV fields.
+                out.columns = out.columns.get_level_values(-1)
+            return out
+    raise ValueError(f"No market data returned for {ticker}")
+
+
 def download_yfinance_history(symbol: str, start: str | pd.Timestamp, end: str | pd.Timestamp) -> pd.DataFrame:
     """Download one NSE symbol's history using the locked yfinance policy.
 
@@ -137,3 +153,73 @@ def download_yfinance_history(symbol: str, start: str | pd.Timestamp, end: str |
     frame = normalize_session_index(frame)
     validate_market_columns(frame)
     return frame
+
+
+def download_yfinance_histories(
+    symbols: list[str],
+    start: str | pd.Timestamp,
+    end: str | pd.Timestamp,
+    batch_size: int = 100,
+) -> dict[str, pd.DataFrame]:
+    """Download many NSE histories in bounded bulk batches.
+
+    yfinance performs the provider requests in parallel inside ``download``.
+    Batching avoids a single oversized request while reducing the per-symbol
+    request overhead of the old sequential acquisition path.
+
+    The function is intentionally strict: every requested symbol must return a
+    non-empty, structurally valid OHLCV history. Partial acquisition raises an
+    error rather than silently producing a partial quantitative universe.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise ImportError("yfinance is required for market-data acquisition") from exc
+
+    normalized = [str(symbol).strip() for symbol in symbols]
+    if any(not symbol for symbol in normalized):
+        raise ValueError("Empty NSE symbol in bulk acquisition request")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("Duplicate symbols in bulk acquisition request")
+
+    histories: dict[str, pd.DataFrame] = {}
+    failures: dict[str, str] = {}
+    tickers = [yfinance_symbol(symbol) for symbol in normalized]
+
+    for offset in range(0, len(tickers), batch_size):
+        batch_tickers = tickers[offset : offset + batch_size]
+        try:
+            bulk = yf.download(
+                tickers=batch_tickers,
+                start=pd.Timestamp(start),
+                end=pd.Timestamp(end),
+                auto_adjust=True,
+                actions=False,
+                progress=False,
+                threads=True,
+                group_by="ticker",
+            )
+        except Exception as exc:
+            for ticker in batch_tickers:
+                failures[ticker] = f"{type(exc).__name__}: {exc}"
+            continue
+
+        for ticker in batch_tickers:
+            symbol = ticker.removesuffix(".NS")
+            try:
+                frame = _extract_bulk_ticker_frame(bulk, ticker)
+                if frame.empty:
+                    raise ValueError(f"No market data returned for {ticker}")
+                frame = normalize_session_index(frame)
+                validate_market_columns(frame)
+                histories[symbol] = frame
+            except Exception as exc:
+                failures[ticker] = f"{type(exc).__name__}: {exc}"
+
+    if failures:
+        raise RuntimeError(f"Bulk market-data acquisition failed for symbols: {failures}")
+
+    return histories
