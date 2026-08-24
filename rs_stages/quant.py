@@ -1,7 +1,7 @@
 """Pure reference calculations for RS-Stages.
 
-These functions intentionally contain no Streamlit/UI/data-download code.
-They are the quantitative layer used by tests and later application code.
+No Streamlit/UI/data-download code belongs here. Functions are deterministic
+quantitative primitives used by tests and later application code.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 
 
 def latest_completed_session(index: pd.DatetimeIndex, decision_date: pd.Timestamp) -> pd.Timestamp:
-    """Return the latest observed session on/before the pre-market decision date."""
+    """Return the latest observed session on/before a pre-market decision date."""
     idx = pd.DatetimeIndex(index).sort_values().unique()
     pos = idx.searchsorted(pd.Timestamp(decision_date), side="right") - 1
     if pos < 0:
@@ -26,9 +26,7 @@ def calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp
 def rs_returns(close: pd.Series, latest: pd.Timestamp) -> dict[int, float]:
     """Calculate 3/6/9/12 calendar-month simple returns."""
     close = close.sort_index().dropna()
-    t = pd.Timestamp(latest)
-    if t not in close.index:
-        t = calendar_asof(close.index, t)
+    t = calendar_asof(close.index, pd.Timestamp(latest))
     latest_close = float(close.loc[t])
     out: dict[int, float] = {}
     for months in (3, 6, 9, 12):
@@ -38,16 +36,11 @@ def rs_returns(close: pd.Series, latest: pd.Timestamp) -> dict[int, float]:
 
 
 def rs_blend(returns: dict[int, float]) -> float:
-    return (
-        0.40 * returns[3]
-        + 0.20 * returns[6]
-        + 0.20 * returns[9]
-        + 0.20 * returns[12]
-    )
+    return 0.40 * returns[3] + 0.20 * returns[6] + 0.20 * returns[9] + 0.20 * returns[12]
 
 
 def rs_score(blend: pd.Series) -> pd.Series:
-    """Cross-sectional RS score using pandas min-percentile ranking."""
+    """Cross-sectional RS score using rank(pct=True, method='min') × 98 + 1."""
     valid = blend.dropna()
     pct = valid.rank(pct=True, method="min")
     result = pd.Series(np.nan, index=blend.index, dtype=float)
@@ -56,6 +49,7 @@ def rs_score(blend: pd.Series) -> pd.Series:
 
 
 def calendar_window(series: pd.Series, end: pd.Timestamp, weeks: int) -> pd.Series:
+    """Return observations in the inclusive preceding calendar-week window."""
     end = pd.Timestamp(end)
     start = end - pd.Timedelta(weeks=weeks)
     s = series.sort_index()
@@ -63,30 +57,38 @@ def calendar_window(series: pd.Series, end: pd.Timestamp, weeks: int) -> pd.Seri
 
 
 def ma_30w(close: pd.Series, end: pd.Timestamp) -> float:
-    window = calendar_window(close.dropna(), end, 30)
-    if window.empty:
-        raise ValueError("Insufficient history for 30W MA")
+    """30-calendar-week simple moving average; full calendar window required."""
+    s = close.sort_index().dropna()
+    t = calendar_asof(s.index, pd.Timestamp(end))
+    start = t - pd.Timedelta(weeks=30)
+    window = s.loc[(s.index >= start) & (s.index <= t)]
+    if window.empty or window.index.min() > start:
+        raise ValueError("Insufficient history for complete 30W MA window")
     return float(window.mean())
 
 
 def ma_30w_series(close: pd.Series) -> pd.Series:
-    """Calendar-window 30W MA at every available session."""
+    """Calendar-window 30W MA at each session where a complete window exists."""
     s = close.sort_index()
     values = []
     for t in s.index:
-        w = calendar_window(s.loc[:t].dropna(), t, 30)
-        values.append(w.mean() if len(w) else np.nan)
+        try:
+            values.append(ma_30w(s, t))
+        except ValueError:
+            values.append(np.nan)
     return pd.Series(values, index=s.index, dtype=float)
 
 
 def ma_slope_pct(ma: pd.Series, end: pd.Timestamp, sessions: int = 10) -> float:
+    """10-session percentage change in the 30W MA."""
     s = ma.sort_index().dropna()
     pos = s.index.searchsorted(pd.Timestamp(end), side="right") - 1
     if pos < sessions:
         raise ValueError("Insufficient history for slope")
-    current = float(s.iloc[pos])
     prior = float(s.iloc[pos - sessions])
-    return (current / prior - 1.0) * 100.0
+    if prior == 0:
+        raise ValueError("Cannot calculate slope from zero prior MA")
+    return (float(s.iloc[pos]) / prior - 1.0) * 100.0
 
 
 def classify_stage(close: float, ma: float, slope_pct: float) -> str:
@@ -102,8 +104,12 @@ def classify_stage(close: float, ma: float, slope_pct: float) -> str:
 
 
 def high_52w(close_high: pd.Series, end: pd.Timestamp, min_sessions: int = 200) -> float:
-    window = calendar_window(close_high.dropna(), end, 52)
-    if len(window) < min_sessions:
+    """Maximum adjusted High in a complete 52-calendar-week window."""
+    s = close_high.sort_index().dropna()
+    t = calendar_asof(s.index, pd.Timestamp(end))
+    start = t - pd.Timedelta(weeks=52)
+    window = s.loc[(s.index >= start) & (s.index <= t)]
+    if window.index.min() > start or len(window) < min_sessions:
         raise ValueError("Insufficient history for 52W high")
     return float(window.max())
 
@@ -113,7 +119,7 @@ def near_52w_high(close: float, high52: float, threshold: float = 0.03) -> bool:
 
 
 def volume_ratio(volume: pd.Series, end: pd.Timestamp) -> float:
-    """Latest completed-session volume / prior 50 completed-session average."""
+    """Latest completed-session volume / preceding 50-session average."""
     v = volume.sort_index().astype(float)
     pos = v.index.searchsorted(pd.Timestamp(end), side="right") - 1
     if pos < 50:
@@ -127,8 +133,7 @@ def volume_ratio(volume: pd.Series, end: pd.Timestamp) -> float:
 def up_down_ratio(close: pd.Series, volume: pd.Series, end: pd.Timestamp) -> float:
     """20-session U/D ending at the latest completed session."""
     c, v = close.sort_index().align(volume.sort_index(), join="inner")
-    c = c.astype(float)
-    v = v.astype(float)
+    c, v = c.astype(float), v.astype(float)
     pos = c.index.searchsorted(pd.Timestamp(end), side="right") - 1
     if pos < 20:
         raise ValueError("Insufficient history for 20-session U/D")
@@ -140,6 +145,21 @@ def up_down_ratio(close: pd.Series, volume: pd.Series, end: pd.Timestamp) -> flo
     if down_sum == 0:
         return np.inf if up_sum > 0 else np.nan
     return up_sum / down_sum
+
+
+def ud_classification(ud: float) -> str:
+    """Apply locked U/D thresholds with Heavy Distribution taking precedence."""
+    if np.isnan(ud):
+        return "Undefined"
+    if ud < 0.6:
+        return "Heavy Distribution"
+    if ud < 0.7:
+        return "Distribution Warning"
+    if ud <= 1.3:
+        return "Neutral"
+    if ud <= 1.5:
+        return "Accumulating"
+    return "Strong Accumulation"
 
 
 def breakout(stage: str, close: float, high52: float, vol_ratio: float) -> bool:
