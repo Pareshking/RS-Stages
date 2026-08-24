@@ -504,7 +504,7 @@ def page_market() -> None:
             "Above the 30-week line",
             fmt_pct(BREADTH["pct_above_ma_30w"], 0, signed=False).rstrip("%"),
             suffix="%",
-            note=f"{BREADTH['above_ma_30w']:,} of {BREADTH['symbols']:,}",
+            note=f"{BREADTH['above_ma_30w']:,} of {BREADTH['classified']:,} classified",
             color=POSITIVE if BREADTH["pct_above_ma_30w"] >= 60 else "var(--ink)",
         )
     ]

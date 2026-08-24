@@ -360,6 +360,15 @@ def screener_table(
     )
 
 
+def _plural(count: Any, noun: str) -> str:
+    """'1 stock' / '12 stocks' — a count of one is not written as a plural."""
+    value = to_float(count)
+    if not math.isfinite(value):
+        return f"{DASH} {noun}s"
+    number = int(value)
+    return f"{number:,} {noun}" if number == 1 else f"{number:,} {noun}s"
+
+
 def industry_table(frame: pd.DataFrame) -> str:
     """Ranked industry rows: rank, name, median-RS bar, participation, 3M."""
     if frame.empty:
@@ -385,7 +394,7 @@ def industry_table(frame: pd.DataFrame) -> str:
             f'<span class="ws-irank num">{rank}</span>'
             f'<div class="ws-iname"><a target="_self" href="?view=Screener&industry='
             f'{html.escape(str(row.get("Industry")), quote=True)}">{esc(row.get("Industry"))}</a>'
-            f'<div class="sub num">{int(to_float(row.get("Stocks")) or 0):,} stocks</div></div>'
+            f'<div class="sub num">{_plural(to_float(row.get("Stocks")), "stock")}</div></div>'
             f'<div class="ws-irs"><div class="ws-irs-track col-hide-sm">'
             f'<div class="ws-irs-fill bar-grow" style="width:{width:.1f}%;background:{color}"></div></div>'
             f'<span class="ws-irs-value num">{fmt_rs(rs)}</span></div>'
