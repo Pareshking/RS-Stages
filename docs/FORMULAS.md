@@ -16,7 +16,25 @@ The mathematical universe is the set of symbols supplied by the NSE Nifty 500 co
 
 Sector/industry classification is taken directly from that CSV's `Industry` field. No F&O filtering, consolidation, or WealthStar remapping is applied to the core universe.
 
-### 1.2 Dates
+### 1.2 Pre-market information boundary
+
+RS-Stages makes its daily decision **before the upcoming NSE trading session opens**.
+
+For a decision on trading day `D`, the information set ends at `T`, where `T` is the most recent completed NSE trading session before `D`.
+
+Therefore:
+
+\[
+InformationSet(D)=\{data\ available\ through\ T\}
+\]
+
+No price, high, volume, close, or derived value from the upcoming/incomplete session `D` may enter the signal calculation.
+
+Whenever a methodology says "current day/session included", this means **the latest completed session `T`**, not the upcoming decision/execution session `D`.
+
+This is a global look-ahead-bias control and applies to every quantitative component.
+
+### 1.3 Dates
 
 All major lookback definitions are calendar-date based unless explicitly stated otherwise.
 
@@ -24,7 +42,7 @@ For a reference date `t` and calendar offset `Δ`, the target date is obtained b
 
 A calendar window therefore means all valid NSE observations whose dates fall within the specified calendar interval; it does not mean a fixed number of rows.
 
-### 1.3 Price and volume inputs
+### 1.4 Price and volume inputs
 
 Production inputs:
 
@@ -176,7 +194,7 @@ The sign convention is:
 
 ### 7.1 Window
 
-The high window is **52 calendar weeks**, not a fixed 252-row rolling window.
+The high window is **52 calendar weeks**, not a fixed 252-row window.
 
 Let `H52(t)` contain all valid adjusted High observations within the 52-calendar-week window ending at `t`.
 
@@ -214,7 +232,7 @@ This condition is used for setup/breakout classification.
 
 ### 8.1 Prior-50-session baseline
 
-Define the volume baseline at date `t` as the mean raw volume of the **preceding 50 trading sessions**, excluding today's volume:
+Define the volume baseline at date `t` as the mean raw volume of the **preceding 50 trading sessions**, excluding the latest completed session itself:
 
 \[
 VolBase_{50}(t)=mean(V_{t-50},...,V_{t-1})
@@ -230,7 +248,7 @@ Equivalent rolling implementation concept:
 VolRatio(t)=\frac{V_t}{VolBase_{50}(t)}
 \]
 
-The current day's volume must never enter its own baseline.
+Here `t` is the **latest completed trading session in the pre-market information set**. The upcoming decision/execution session must never enter the calculation.
 
 If 50 prior valid observations are unavailable, the volume ratio is not considered valid.
 
@@ -240,7 +258,7 @@ If 50 prior valid observations are unavailable, the volume ratio is not consider
 
 ### 9.1 Direction classification
 
-For each session `t`:
+For each completed session `t`:
 
 \[
 \Delta Close_t=Close_t-Close_{t-1}
@@ -268,20 +286,22 @@ An unchanged close contributes to neither side.
 
 ### 9.2 Twenty-session sums
 
+For the latest completed session `T` available before the decision:
+
 \[
-UpVol20_t=\sum_{k=t-19}^{t}UpVol_k
+UpVol20_T=\sum_{k=T-19}^{T}UpVol_k
 \]
 
 \[
-DownVol20_t=\sum_{k=t-19}^{t}DownVol_k
+DownVol20_T=\sum_{k=T-19}^{T}DownVol_k
 \]
 
-No shift is applied; the current session is included in the 20-session U/D calculation.
+The latest completed session **is included**. The upcoming decision/execution session is excluded because its data is not yet available.
 
 ### 9.3 U/D ratio
 
 \[
-UD_t=\frac{UpVol20_t}{DownVol20_t}
+UD_T=\frac{UpVol20_T}{DownVol20_T}
 \]
 
 The arbitrary `+1` denominator adjustment from the source implementation is **not** part of the locked RS-Stages production mathematics.
@@ -399,21 +419,22 @@ The implementation must not use a row-count shortcut where it changes the locked
 
 Before production implementation is considered mathematically validated, create independent tests for at least:
 
-1. Calendar-month reference-date selection.
-2. Four RS return calculations.
-3. 40/20/20/20 RS blend.
-4. Percentile ranking with `method='min'`, ties and NaNs.
-5. 30-calendar-week MA.
-6. 10-trading-session slope.
-7. 52-calendar-week high.
-8. ≥200-session minimum for the 52W high.
-9. 3% near-high condition.
-10. Prior-50-session volume baseline with `shift(1)`.
-11. Up/down volume classification.
-12. 20-session U/D ratio.
-13. Zero-denominator U/D handling.
-14. Breakout vs Breakout Confirmed distinction.
-15. Optional liquidity filter not affecting mathematical RS ranking.
+1. Pre-market information boundary.
+2. Calendar-month reference-date selection.
+3. Four RS return calculations.
+4. 40/20/20/20 RS blend.
+5. Percentile ranking with `method='min'`, ties and NaNs.
+6. 30-calendar-week MA.
+7. 10-trading-session slope.
+8. 52-calendar-week high.
+9. ≥200-session minimum for the 52W high.
+10. 3% near-high condition.
+11. Prior-50-session volume baseline with `shift(1)`.
+12. Up/down volume classification.
+13. 20-session U/D ratio using the latest completed session.
+14. Zero-denominator U/D handling.
+15. Breakout vs Breakout Confirmed distinction.
+16. Optional liquidity filter not affecting mathematical RS ranking.
 
 Each critical formula should have at least one controlled synthetic dataset for which the expected answer is independently known.
 
