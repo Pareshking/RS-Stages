@@ -7,7 +7,9 @@
 - Primary technology: Streamlit
 - Project scope: development, quantitative research, mathematical validation, testing, auditing, continuous improvement, and professional presentation of the RS-Stages system.
 
-This file is the persistent project memory and operating specification for RS-Stages. It should be kept current as the project evolves.
+This file is the persistent project memory and engineering operating specification for RS-Stages.
+
+The detailed quantitative inputs are maintained separately in **`docs/LOCKED_SPEC.md`**. Any AI working on RS-Stages must read `MEMORY.md` and `docs/LOCKED_SPEC.md` before modifying quantitative logic.
 
 ---
 
@@ -53,9 +55,24 @@ Never stop at the first green result.
 
 ---
 
-## 4. Book / Methodology Fidelity
+## 4. Quantitative Authority and Document Hierarchy
 
-The referenced book/material is the authoritative quantitative reference.
+For quantitative implementation, use this hierarchy:
+
+1. **Explicit project decisions in `docs/LOCKED_SPEC.md`** — authoritative production inputs.
+2. Supplied book/methodology/source material — authoritative reference for methodology and intent, subject to explicit project decisions.
+3. Documented implementation assumptions — only where unavoidable and clearly labelled.
+4. Conventional practice — never silently substituted for the project specification.
+
+`docs/LOCKED_SPEC.md` contains the decisions explicitly resolved during the 2026-08-24 review, including calendar-based RS periods, 30-calendar-week WMA, calendar-based 52-week high, 50-session volume baseline, 10-session slope, NSE CSV industry classification, and the breakout/volume logic.
+
+A locked decision must not be silently changed. If new evidence indicates that a locked decision is wrong, ambiguous, or impossible to implement correctly, raise a new decision/audit item before changing it.
+
+Never change methodology merely because an alternative produces better backtest performance.
+
+---
+
+## 5. Book / Methodology Fidelity
 
 For every major calculation use:
 
@@ -66,19 +83,17 @@ Any ambiguity must be identified explicitly.
 If multiple mathematical interpretations are possible:
 
 - identify the alternatives;
-- determine which is most faithful to the author's methodology;
-- test the consequences where practical;
+- determine which is most faithful to the methodology;
+- test consequences where practical;
 - document the chosen interpretation.
 
 Never silently invent assumptions.
-
-Never change methodology merely because an alternative produces better backtest performance.
 
 Performance does not validate incorrect mathematics.
 
 ---
 
-## 5. Quantitative Audit Standard
+## 6. Quantitative Audit Standard
 
 ### Mathematical correctness
 
@@ -93,7 +108,7 @@ Audit at minimum:
 - Ranking
 - Aggregation
 - Rolling calculations
-- Window definitions
+- Calendar-window definitions
 - Boundary conditions
 - Missing observations
 - Zero values
@@ -107,7 +122,7 @@ Audit:
 
 - Observation dates
 - Trading-day alignment
-- Period boundaries
+- Calendar period boundaries
 - Lookback windows
 - Rebalancing dates
 - Signal dates
@@ -125,7 +140,7 @@ Audit:
 - Sample vs population statistics
 - Standard-deviation methodology
 - Regression methodology
-- R² calculations
+- R² calculations where applicable
 - Correlation
 - Ranking methodology
 - Outlier treatment
@@ -150,11 +165,11 @@ Audit:
 - Corporate actions
 - Benchmark alignment
 
-Where the methodology differs from conventional practice, follow the book unless there is explicit evidence that the implementation is intentionally different.
+Where methodology differs from conventional practice, follow the locked project specification and source methodology rather than convention.
 
 ---
 
-## 6. Independent Validation
+## 7. Independent Validation
 
 Critical calculations must not be validated solely by inspecting the code that generated them.
 
@@ -175,7 +190,7 @@ Synthetic datasets should be deliberately constructed so expected results can be
 
 ---
 
-## 7. Data Quality Audit
+## 8. Data Quality Audit
 
 Data quality is part of quantitative correctness.
 
@@ -199,9 +214,11 @@ Investigate:
 
 Never silently fill, interpolate, transform, or discard data unless the methodology permits it or the transformation has a documented quantitative justification.
 
+The production data architecture currently locked in `docs/LOCKED_SPEC.md` uses yfinance with `auto_adjust=True`, adjusted Close/High, and raw Volume, while symbols and Industry classification come from the NSE constituent CSV.
+
 ---
 
-## 8. Testing Standard
+## 9. Testing Standard
 
 Testing must extend beyond application startup.
 
@@ -226,6 +243,8 @@ At minimum consider:
 - Newly listed securities
 - Delisted securities
 - Unusual corporate actions
+- Zero down-volume for U/D calculations
+- Calendar boundaries such as month-end, leap years, and holiday gaps
 
 ### Integration tests
 Verify correct flow through the quantitative pipeline.
@@ -238,7 +257,7 @@ Verify the complete path from data acquisition through calculation to Streamlit 
 
 ---
 
-## 9. Evidence Standard / No Blind Trust
+## 10. Evidence Standard / No Blind Trust
 
 Do not use claims such as:
 
@@ -255,7 +274,7 @@ If something cannot be verified, state that explicitly. Never manufacture confid
 
 ---
 
-## 10. Streamlit Product Standard
+## 11. Streamlit Product Standard
 
 RS-Stages should be a professional quantitative research platform rather than a generic Streamlit demo.
 
@@ -294,7 +313,7 @@ Visual quality must never hide quantitative methodology or uncertainty.
 
 ---
 
-## 11. Homepage Standard
+## 12. Homepage Standard
 
 The homepage should clearly explain:
 
@@ -309,7 +328,7 @@ Purpose should be immediately understandable without overwhelming the user.
 
 ---
 
-## 12. Information Architecture
+## 13. Information Architecture
 
 Use logical professional tabs with clearly defined purposes.
 
@@ -321,7 +340,7 @@ Quantitative outputs must include enough context to understand what each number 
 
 ---
 
-## 13. Numerical Traceability
+## 14. Numerical Traceability
 
 Important displayed metrics should expose, where practical:
 
@@ -339,7 +358,7 @@ Avoid black-box numbers.
 
 ---
 
-## 14. Correctness Before Performance
+## 15. Correctness Before Performance
 
 Correctness is the first priority.
 
@@ -361,26 +380,27 @@ Priority order:
 
 ---
 
-## 15. Repository Discipline
+## 16. Repository Discipline
 
 Before modifying the repository:
 
 1. Inspect current branch.
 2. Inspect repository structure.
 3. Read README and relevant documentation.
-4. Understand existing architecture.
-5. Identify current implementation.
-6. Identify existing tests.
-7. Determine what has already been validated.
-8. Preserve correct existing work.
-9. Avoid unnecessary redesign.
-10. Change only what is necessary to improve correctness, reliability, functionality, or presentation.
+4. Read `MEMORY.md` and `docs/LOCKED_SPEC.md`.
+5. Understand existing architecture.
+6. Identify current implementation.
+7. Identify existing tests.
+8. Determine what has already been validated.
+9. Preserve correct existing work.
+10. Avoid unnecessary redesign.
+11. Change only what is necessary to improve correctness, reliability, functionality, or presentation.
 
 This is a continuation project, not a reason to restart from scratch.
 
 ---
 
-## 16. Change Discipline
+## 17. Change Discipline
 
 Every modification requires a reason.
 
@@ -400,7 +420,7 @@ Do not modify methodology merely because another approach is personally preferre
 
 ---
 
-## 17. Issue Classification
+## 18. Issue Classification
 
 Every significant issue should be classified as one or more of:
 
@@ -418,7 +438,7 @@ Fix the problem at the appropriate layer.
 
 ---
 
-## 18. Completion Gate
+## 19. Completion Gate
 
 Never declare a feature or milestone complete until checking, as applicable:
 
@@ -445,22 +465,39 @@ Only then declare completion.
 
 ---
 
-## 19. Current Project State
+## 20. Current Project State
 
-As of the initial RS-Stages handover on 2026-08-24:
+As of 2026-08-24:
 
 - Repository exists and is public.
 - Default branch is `main`.
-- Repository is currently empty; no README or application files were present at the time this memory file was created.
-- This `MEMORY.md` is therefore the first project document and establishes the initial engineering operating specification.
-- No quantitative implementation has yet been validated from the repository.
-- No book/material source has yet been added to the repository or formally mapped to formulas.
+- `MEMORY.md` was the first project document.
+- The supplied methodology PDF was reviewed before locking the production inputs.
+- `docs/LOCKED_SPEC.md` is now the authoritative repository document for the resolved quantitative inputs.
+- No production quantitative implementation has yet been validated from the repository.
+- No production test suite has yet been established.
 
-Future project-state updates must be appended or revised here as evidence becomes available.
+The following inputs are now explicitly locked:
+
+- Calendar dates for all RS periods.
+- 30-calendar-week WMA for stages.
+- 10 trading-session slope window.
+- Calendar-date 52-week high with at least 200 valid sessions.
+- 50-observation prior volume baseline with `min_periods=50` and `.shift(1)`.
+- Breakout vs Breakout Confirmed distinction and precedence.
+- NSE constituent CSV as symbol universe and exact CSV Industry classification.
+- No F&O filtering.
+- yfinance with adjusted Close/High and raw Volume.
+- Sufficient calendar history as the data requirement; fixed row counts are only implementation buffers.
+- Optional ₹5 crore liquidity filter applied only after computation.
+- U/D ratio without arbitrary `+1`, with explicit zero-denominator handling.
+- RS Line limited to the current download window for v1.
+
+These are locked **inputs**, not yet validated implementation results.
 
 ---
 
-## 20. Working Rule
+## 21. Working Rule
 
 For all future RS-Stages work, continuously apply:
 
