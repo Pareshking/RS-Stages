@@ -79,11 +79,13 @@ st.caption("Relative Strength · Stage · Breakout · Industry research")
 try:
     with st.spinner("Loading the maintained Nifty Total Market universe and latest completed-session data…"):
         universe, result = load_live_research(decision_ts, st.session_state.refresh_key)
+        source_universe = pd.read_csv(UNIVERSE_PATH)
 except Exception as exc:
     st.error(f"Live dashboard could not load: {exc}")
     st.info("The dashboard uses the repository's maintained Nifty Total Market snapshot automatically; no CSV upload is required.")
     st.stop()
 
+dummy_count = int(source_universe["Symbol"].astype(str).str.startswith("DUMMY", na=False).sum())
 valid_rs = result["RS_Score"].notna()
 latest_dates = pd.to_datetime(result["Date"], errors="coerce").dropna()
 latest_common = latest_dates.min() if not latest_dates.empty else pd.NaT
@@ -99,9 +101,9 @@ with home:
     )
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Universe", f"{len(result):,}")
-    c2.metric("Valid RS", f"{int(valid_rs.sum()):,}")
-    c3.metric("Industries", f"{result['Industry'].nunique():,}")
+    c1.metric("Source universe", f"{len(source_universe):,}")
+    c2.metric("Acquisition universe", f"{len(result):,}")
+    c3.metric("Valid RS", f"{int(valid_rs.sum()):,}")
     c4.metric("Breakouts", f"{int(result['Breakout'].sum()):,}")
     c5.metric("Confirmed", f"{int(result['Breakout_Confirmed'].sum()):,}")
 
@@ -122,11 +124,12 @@ with home:
         )
 
     st.markdown("#### Market / data status")
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Latest completed session", latest_common.date().isoformat() if pd.notna(latest_common) else "—")
-    s2.metric("Liquid > ₹5Cr", f"{int(result['Liquid_UI_Filter'].sum()):,}")
-    s3.metric("Near 52W high", f"{int(result['Near_52W_High'].sum()):,}")
-    s4.metric("DUMMY excluded", f"{len(universe.constituents) - len(result):,}")
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.metric("Industries", f"{result['Industry'].nunique():,}")
+    s2.metric("Latest completed session", latest_common.date().isoformat() if pd.notna(latest_common) else "—")
+    s3.metric("Liquid > ₹5Cr", f"{int(result['Liquid_UI_Filter'].sum()):,}")
+    s4.metric("Near 52W high", f"{int(result['Near_52W_High'].sum()):,}")
+    s5.metric("DUMMY excluded", f"{dummy_count:,}")
 
 with ranking:
     st.subheader("RS Ranking")
