@@ -30,6 +30,7 @@ def test_liquidity_is_ui_filter_not_rs_universe_filter():
 
 
 def test_liquidity_requires_20_valid_completed_sessions():
-    result = analyze_universe({"AAA": _snapshot(100.0, start="2025-12-01", end="2026-01-02")})
+    # 15 business sessions: deliberately below the locked 20-session minimum.
+    result = analyze_universe({"AAA": _snapshot(100.0, start="2025-12-15", end="2026-01-02")})
     assert np.isnan(result.loc["AAA", "AvgValue20"])
     assert not bool(result.loc["AAA", "Liquid_UI_Filter"])
