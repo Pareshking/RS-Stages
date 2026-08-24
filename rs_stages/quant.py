@@ -287,8 +287,16 @@ def sma(close: pd.Series, end: pd.Timestamp, sessions: int) -> float:
     average as a calendar-week construction; §5.1's criteria are stated by their
     author in trading sessions. Thirty calendar weeks is not 150 sessions, and
     collapsing the two would restate one author's rule in another's units.
+
+    Sessions without a Close are dropped before the window is taken, so this is
+    the mean of the latest ``sessions`` closes that exist. Averaging whatever
+    survives inside a fixed slice would report the mean of 199 observations as a
+    200-session average, which §3 forbids: the shortfall would be invisible.
+    A calendar-window average has no such problem — its bounds are dates, so
+    skipping a gap changes nothing — which is why only the session-count
+    averages need this.
     """
-    c = close.sort_index().astype(float)
+    c = close.sort_index().astype(float).dropna()
     pos = _position(c.index, end)
     if pos + 1 < sessions:
         raise ValueError(f"Insufficient history for a {sessions}-session average")
@@ -296,8 +304,12 @@ def sma(close: pd.Series, end: pd.Timestamp, sessions: int) -> float:
 
 
 def sma_series(close: pd.Series, sessions: int) -> pd.Series:
-    """The same average at every session, for slope tests and charting."""
-    return close.sort_index().astype(float).rolling(sessions, min_periods=sessions).mean()
+    """The same average at every session, for slope tests and charting.
+
+    Missing closes are dropped first, for the reason given in :func:`sma`.
+    """
+    valid = close.sort_index().astype(float).dropna()
+    return valid.rolling(sessions, min_periods=sessions).mean()
 
 
 def sma_rising(close: pd.Series, end: pd.Timestamp, sessions: int, over: int) -> bool:
