@@ -67,8 +67,14 @@ def test_slope_is_ten_sessions():
     assert np.isclose(ma_slope_pct(ma, idx[-1], 10), 10.0)
 
 
-def test_30w_ma_requires_complete_calendar_window():
-    idx = pd.date_range("2025-01-01", "2025-06-30", freq="7D")
+def test_30w_ma_uses_calendar_start_asof_session():
+    idx = pd.date_range("2025-01-01", "2025-07-30", freq="7D")
+    close = pd.Series(100.0, index=idx)
+    assert ma_30w(close, idx[-1]) == 100.0
+
+
+def test_30w_ma_requires_history_before_calendar_window():
+    idx = pd.date_range("2025-01-01", "2025-01-29", freq="7D")
     close = pd.Series(100.0, index=idx)
     with pytest.raises(ValueError):
         ma_30w(close, idx[-1])
