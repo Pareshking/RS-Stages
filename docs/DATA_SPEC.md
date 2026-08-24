@@ -28,6 +28,20 @@ For decision session `D`, only data through the latest completed session `T` is 
 
 The production boundary is implemented by `build_decision_snapshot()` in `rs_stages/data.py` and must run before quantitative signal calculations.
 
+## Integration Boundary
+
+`build_universe_snapshots()` in `rs_stages/pipeline.py` is the deterministic integration boundary between the NSE universe and market histories.
+
+The pipeline:
+
+1. Loads the NSE CSV without changing `Symbol` or `Industry`.
+2. Requires market history for every universe symbol; it does not silently drop missing symbols.
+3. Builds a separate pre-market `DecisionSnapshot` for every symbol.
+4. Returns the original constituent table plus the permitted snapshot dictionary.
+5. Does not calculate signals directly from raw provider history.
+
+This layer deliberately stops before signal calculation. Quantitative functions must consume the returned snapshots so the information-set boundary cannot be bypassed accidentally.
+
 ## Calendar Windows
 
 All specified lookbacks are calendar-date based unless explicitly defined as session-based:
@@ -62,7 +76,7 @@ Acquisition and decision-boundary enforcement are separate: downloaded data must
 
 ## Validation
 
-The data layer is tested independently for:
+The data/integration layer is tested independently for:
 
 1. Calendar reference-date resolution.
 2. Latest-completed-session selection.
@@ -74,3 +88,5 @@ The data layer is tested independently for:
 8. Universe/Industry ingestion from the NSE CSV.
 9. Yahoo symbol mapping without changing the underlying NSE universe.
 10. Required market-column validation.
+11. Complete NSE-universe-to-snapshot integration.
+12. Rejection when any universe symbol has no supplied market history.
