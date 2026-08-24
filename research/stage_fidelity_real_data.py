@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from rs_stages.quant import calendar_asof, classify_stage, ma_30w, ma_slope_pct
+from rs_stages.quant import classify_stage, ma_30w, ma_slope_pct
 from research.stage_fidelity_experiment import research_stage
 
 
@@ -49,16 +49,29 @@ def classify_history(close: pd.Series) -> list[dict]:
         if t not in close.index:
             continue
         v1 = classify_stage(float(close.loc[t]), float(ma.loc[t]), float(slope))
-        start = max(0, ma.index.get_loc(t) - 39)
-        recent_idx = ma.index[start : ma.index.get_loc(t) + 1]
+        pos = ma.index.get_loc(t)
+        start = max(0, pos - 39)
+        recent_idx = ma.index[start : pos + 1]
         recent_close = close.reindex(recent_idx).dropna()
-        recent_ma = ma.reindex(recent_close.index)
-        recent_slope = ma.reindex(recent_close.index)
-        if len(recent_close) < 8:
+        recent_ma = ma.reindex(recent_close.index).dropna()
+        if len(recent_close) < 8 or len(recent_ma) < 8:
             continue
-        # Candidate uses the current production MA/slope series; only the
-        # classification rule differs.
-        candidate = research_stage(recent_close, recent_ma, recent_slope)
+        recent_close = recent_close.reindex(recent_ma.index)
+        slope_values = {}
+        for candidate_date in recent_ma.index:
+            try:
+                slope_values[candidate_date] = ma_slope_pct(ma, candidate_date, 10)
+            except ValueError:
+                continue
+        recent_slope = pd.Series(slope_values, dtype=float).sort_index()
+        common = recent_close.index.intersection(recent_slope.index)
+        if len(common) < 8:
+            continue
+        candidate = research_stage(
+            recent_close.reindex(common),
+            recent_ma.reindex(common),
+            recent_slope.reindex(common),
+        )
         rows.append(
             {
                 "date": t,
@@ -94,10 +107,7 @@ def main() -> None:
     rows: list[dict] = []
     for symbol, ticker in zip(symbols, tickers):
         try:
-            if len(tickers) == 1:
-                close = raw["Close"]
-            else:
-                close = raw[ticker]["Close"]
+            close = raw["Close"] if len(tickers) == 1 else raw[ticker]["Close"]
             close = close.dropna()
             for row in classify_history(close):
                 row["symbol"] = symbol
