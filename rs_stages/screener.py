@@ -6,6 +6,7 @@ import pandas as pd
 
 from .data import DecisionSnapshot
 from .quant import (
+    atr_pct,
     breakout,
     breakout_confirmed,
     classify_stage,
@@ -15,11 +16,27 @@ from .quant import (
     ma_30w,
     ma_30w_series,
     ma_slope_pct,
+    contraction_ratio,
+    pct_to_pivot,
+    range_blocks,
     rs_blend,
+    rs_line,
+    rs_line_at_high,
+    rs_line_high_52w,
+    rs_line_nh_before_price,
     rs_returns,
     rs_score,
+    sma,
+    sma_rising,
+    stage1_readiness,
+    trend_template,
     up_down_ratio,
+    vcp_contractions,
+    vcp_pivot,
+    vcp_setup,
+    volume_dryup,
     volume_ratio,
+    TREND_TEMPLATE_RISING_SESSIONS,
 )
 
 #: Columns the presentation layer may read without recomputing anything.
@@ -37,7 +54,10 @@ TREND_HEALTH_CONDITIONS = (
 
 
 def _analyze_symbol(
-    symbol: str, snap: DecisionSnapshot, trend_sessions: int | None
+    symbol: str,
+    snap: DecisionSnapshot,
+    trend_sessions: int | None,
+    benchmark: pd.Series | None = None,
 ) -> tuple[dict, pd.DataFrame | None]:
     """Calculate one symbol's locked fields and, optionally, its trend series.
 
@@ -182,6 +202,9 @@ def _analyze_symbol(
         else False
     )
 
+    row.update(_prebreakout(data, close, high, volume, t, benchmark))
+    row["Pct_To_Pivot"] = pct_to_pivot(row["Close"], row["VCP_Pivot"])
+
     trend = None
     if trend_sessions is not None:
         frame = pd.DataFrame(
@@ -195,6 +218,86 @@ def _analyze_symbol(
         trend = frame.tail(trend_sessions) if trend_sessions > 0 else frame
 
     return row, trend
+
+
+def _prebreakout(
+    data: pd.DataFrame,
+    close: pd.Series,
+    high: pd.Series,
+    volume: pd.Series,
+    t: pd.Timestamp,
+    benchmark: pd.Series | None,
+) -> dict:
+    """v2.2 §4.1, §5.1, §10.4-10.6 fields that need no cross-sectional input.
+
+    Every field degrades on its own. A symbol without enough history for a
+    200-session average still reports its contraction, and one whose provider
+    frame carries no Low still reports its trend template. Nothing here
+    substitutes a value it could not compute.
+    """
+    row: dict = {}
+
+    # Session-based averages. Deliberately not MA_30W: see §5.1.
+    for sessions, field in ((150, "SMA_150"), (200, "SMA_200")):
+        try:
+            row[field] = sma(close, t, sessions)
+        except (ValueError, KeyError):
+            row[field] = float("nan")
+    try:
+        row["SMA_200_Rising"] = sma_rising(close, t, 200, TREND_TEMPLATE_RISING_SESSIONS)
+    except (ValueError, KeyError):
+        row["SMA_200_Rising"] = False
+
+    # Volatility and contraction both need Low, which §9.1 treats as optional.
+    low = data["Low"].astype(float) if "Low" in data.columns else None
+    if low is not None:
+        try:
+            row["ATR_Pct"] = atr_pct(high, low, close, t)
+        except (ValueError, KeyError):
+            row["ATR_Pct"] = float("nan")
+        try:
+            blocks = range_blocks(high, low, close, t)
+            row["VCP_Contractions"] = vcp_contractions(blocks)
+            row["Contraction_Ratio"] = contraction_ratio(blocks)
+        except (ValueError, KeyError):
+            row["VCP_Contractions"] = 0
+            row["Contraction_Ratio"] = float("nan")
+    else:
+        row["ATR_Pct"] = float("nan")
+        row["VCP_Contractions"] = 0
+        row["Contraction_Ratio"] = float("nan")
+
+    try:
+        row["Volume_DryUp"] = volume_dryup(volume, t)
+    except (ValueError, KeyError):
+        row["Volume_DryUp"] = float("nan")
+
+    row["VCP_Setup"] = vcp_setup(
+        row["Contraction_Ratio"], row["Volume_DryUp"], row["VCP_Contractions"]
+    )
+
+    try:
+        row["VCP_Pivot"] = vcp_pivot(high, t)
+    except (ValueError, KeyError):
+        row["VCP_Pivot"] = float("nan")
+
+    # The RS line needs a benchmark. Absent one the fields are unavailable
+    # rather than defaulted: a stock has no relative strength against nothing.
+    row["RS_Line"] = float("nan")
+    row["RS_Line_High_52W"] = float("nan")
+    row["RS_Line_At_High"] = False
+    if benchmark is not None:
+        try:
+            line = rs_line(close.loc[:t], benchmark)
+            if not line.empty:
+                row["RS_Line"] = float(line.iloc[-1])
+                row["RS_Line_High_52W"] = rs_line_high_52w(line, t)
+                row["RS_Line_At_High"] = rs_line_at_high(
+                    row["RS_Line"], row["RS_Line_High_52W"]
+                )
+        except (ValueError, KeyError, IndexError):
+            pass
+    return row
 
 
 def _finalize(result: pd.DataFrame) -> pd.DataFrame:
@@ -211,21 +314,80 @@ def _finalize(result: pd.DataFrame) -> pd.DataFrame:
     result["Trend_Health"] = (
         sum(result[field].astype(bool).astype(int) for field, _ in TREND_HEALTH_CONDITIONS)
     ).astype(int)
+
+    # §5.1 and §11.1 both read RS, so like trend health they can only be
+    # resolved after the cross-sectional score exists.
+    template = pd.DataFrame(
+        [
+            trend_template(
+                close=r.get("Close", float("nan")),
+                sma_50=r.get("SMA_50", float("nan")),
+                sma_150=r.get("SMA_150", float("nan")),
+                sma_200=r.get("SMA_200", float("nan")),
+                sma_200_rising=bool(r.get("SMA_200_Rising", False)),
+                low_52w=r.get("Low_52W", float("nan")),
+                high_52w=r.get("High_52W", float("nan")),
+                rs=r.get("RS_Score", float("nan")),
+            )
+            for r in result.to_dict("records")
+        ],
+        index=result.index,
+    )
+    for column in template.columns:
+        result[column] = template[column]
+
+    # §4.1 — the divergence is the ordering of two facts already published.
+    result["RS_Line_NH_Before_Price"] = [
+        rs_line_nh_before_price(line, high, pct)
+        for line, high, pct in zip(
+            result["RS_Line"], result["RS_Line_High_52W"], result["Pct_From_52W_High"]
+        )
+    ]
+
+    # §11.1 — defined only for Stage 1, and unavailable rather than zero
+    # elsewhere: a score of 0 would read as "a bad base" for a stock that has
+    # no base at all.
+    # str() at the point of use, not astype(str) on the column: pandas 3.0
+    # preserves missing values through astype(str) rather than rendering them
+    # "nan", so a symbol with too little history to classify arrives here as a
+    # float and Stage.astype(str) does not make it safe to call .startswith on.
+    readiness = [
+        stage1_readiness(slope, rs, ratio, dryup, close, ma10)
+        if str(label).startswith("Stage 1")
+        else float("nan")
+        for label, slope, rs, ratio, dryup, close, ma10 in zip(
+            result["Stage"],
+            result["MA_30W_Slope_10S_Pct"],
+            result["RS_Score"],
+            result["Contraction_Ratio"],
+            result["Volume_DryUp"],
+            result["Close"],
+            result["MA_10W"],
+        )
+    ]
+    result["Stage1_Readiness"] = pd.Series(readiness, index=result.index, dtype="float64")
     return result
 
 
-def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
+def analyze_universe(
+    snapshots: dict[str, DecisionSnapshot], benchmark: pd.Series | None = None
+) -> pd.DataFrame:
     """Calculate RS/Stage fields before optional liquidity filtering.
 
     The guide interpretation layer consumes only fields produced here or by
     the validated stock-history path. Missing history remains explicit.
     """
-    rows = [_analyze_symbol(symbol, snap, None)[0] for symbol, snap in snapshots.items()]
+    rows = [
+        _analyze_symbol(symbol, snap, None, benchmark)[0]
+        for symbol, snap in snapshots.items()
+    ]
     return _finalize(pd.DataFrame(rows).set_index("Symbol"))
 
 
 def analyze_universe_with_trend(
-    snapshots: dict[str, DecisionSnapshot], trend_sessions: int = 260
+    snapshots: dict[str, DecisionSnapshot],
+    trend_sessions: int = 260,
+    benchmark: pd.Series | None = None,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Return the locked snapshot plus each symbol's trailing trend series.
 
@@ -237,7 +399,7 @@ def analyze_universe_with_trend(
     rows: list[dict] = []
     trends: dict[str, pd.DataFrame] = {}
     for symbol, snap in snapshots.items():
-        row, trend = _analyze_symbol(symbol, snap, trend_sessions)
+        row, trend = _analyze_symbol(symbol, snap, trend_sessions, benchmark)
         rows.append(row)
         if trend is not None:
             trends[str(symbol)] = trend
