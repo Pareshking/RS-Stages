@@ -207,10 +207,30 @@ def posture_bar(stage_counts: dict[str, int], title: str = "Stage posture") -> s
     )
 
 
-def shelf(label: str, count: int, color: str, items: Iterable[tuple[Any, Any]], limit: int = 12) -> str:
-    """One 'what changed' row: label, count badge, and member pills."""
-    members = list(items)[:limit]
+def shelf(
+    label: str,
+    count: int,
+    color: str,
+    items: Iterable[tuple[Any, Any]],
+    limit: int = 12,
+    more_href: str = "",
+) -> str:
+    """One 'what changed' row: label, count badge, and member pills.
+
+    When the group is larger than the row can hold, the overflow is stated
+    rather than silently dropped, with a link to where the rest lives.
+    """
+    all_items = list(items)
+    members = all_items[:limit]
     pills = "".join(pill_link(symbol, meta) for symbol, meta in members)
+    hidden = len(all_items) - len(members)
+    if hidden > 0:
+        target = f' href="{more_href}"' if more_href else ""
+        tag = "a" if more_href else "span"
+        pills += (
+            f'<{tag} class="ws-pill-link pop" target="_self"{target} '
+            f'style="color:var(--sub)"><span class="sym">+{hidden} more</span></{tag}>'
+        )
     return (
         f'<div class="ws-shelf">'
         f'<span class="ws-shelf-label" style="color:{color}">{esc(label)}</span>'
@@ -242,6 +262,109 @@ def kv_grid(items: Sequence[tuple[str, str, str, str]]) -> str:
         for label, value, note, color in items
     )
     return f'<div class="ws-kv">{tiles}</div>'
+
+
+#: Tone for a boolean condition. "good" means True is favourable evidence,
+#: "warn" means True is a caution, "neutral" means True carries no valence.
+STATE_TONES = {
+    "good": (POSITIVE, "var(--up-bg)"),
+    "warn": ("#B5781A", "var(--amber-bg)"),
+    "bad": (NEGATIVE, "var(--down-bg)"),
+    "neutral": ("var(--sub)", "var(--track)"),
+}
+
+
+def state_pill(value: Any, tone: str = "good", yes: str = "Yes", no: str = "No") -> str:
+    """Render a boolean condition as a pill coloured by what it means.
+
+    A flat "Yes" loses the distinction between confirmation and a warning: a
+    confirmed breakout and a distribution warning are not the same kind of Yes.
+    Only the meaningful state is coloured; its absence stays neutral.
+    """
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return f'<span class="ws-state" style="background:var(--track);color:var(--faint)">{DASH}</span>'
+    active = bool(value)
+    color, background = STATE_TONES[tone if active else "neutral"]
+    return f'<span class="ws-state" style="background:{background};color:{color}">{esc(yes if active else no)}</span>'
+
+
+def evidence_card(title: str, rows: Sequence[tuple[str, str, str]]) -> str:
+    """A titled block of label / value rows, each with its definition beneath.
+
+    Replaces a flat field-value dump: the reader can see which measure a number
+    belongs to, and what it means, without consulting the methodology page.
+    """
+    body = "".join(
+        f'<div class="ws-ev"><div class="ws-ev-label">{esc(label)}'
+        f'<div class="ws-ev-note">{esc(note)}</div></div>'
+        f'<div class="ws-ev-value num">{value}</div></div>'
+        for label, value, note in rows
+    )
+    return card(f'<div class="ws-card-title">{esc(title)}</div>{body}')
+
+
+def evidence_grid(cards: Iterable[str]) -> str:
+    return f'<div class="ws-ev-grid">{"".join(cards)}</div>'
+
+
+#: Status marks for the threshold table, in the guide's own vocabulary.
+STATUS_MARKS = {
+    "met": ("✓", POSITIVE, "var(--up-bg)"),
+    "unmet": ("✕", NEGATIVE, "var(--down-bg)"),
+    "caution": ("■", "#B5781A", "var(--amber-bg)"),
+    "neutral": ("·", "var(--sub)", "var(--track)"),
+}
+
+
+def signal_line(label: str, value: str, tone: str = "neutral") -> str:
+    """One line of the Signal Card: what the measure is, and what it reads."""
+    color = {"good": POSITIVE, "warn": "#B5781A", "bad": NEGATIVE}.get(tone, "var(--ink)")
+    return (
+        f'<div class="ws-sigline"><span class="ws-sigline-label">{esc(label)}</span>'
+        f'<span class="ws-sigline-value" style="color:{color}">{esc(value)}</span></div>'
+    )
+
+
+def signal_note(kind: str, text: str) -> str:
+    """A WAIT / conflict / caution note. Absent notes render nothing at all."""
+    if not text:
+        return ""
+    palette = {
+        "wait": ("#B5781A", "var(--amber-bg)", "Waiting on"),
+        "conflict": ("#2D6CDF", "var(--blue-bg)", "Conflict"),
+        "caution": ("#C2562F", "var(--slip-bg)", "Caution"),
+        "source": ("var(--sub)", "var(--track)", "Source"),
+    }
+    color, background, title = palette[kind]
+    return (
+        f'<div class="ws-signote" style="background:{background};border-color:{color}33">'
+        f'<span class="ws-signote-title" style="color:{color}">{title}</span>'
+        f'<span class="ws-signote-body">{esc(text)}</span></div>'
+    )
+
+
+def threshold_table(rows: Sequence[Any]) -> str:
+    """The guide's Signal / Value / Threshold / Status table, as boxes."""
+    body = "".join(
+        (
+            lambda mark: (
+                f'<div class="ws-thr">'
+                f'<div class="ws-thr-signal">{esc(r.signal)}'
+                f'<div class="ws-thr-note">{esc(r.note)}</div></div>'
+                f'<div class="ws-thr-value num">{esc(r.value)}</div>'
+                f'<div class="ws-thr-rule">{esc(r.threshold)}</div>'
+                f'<div class="ws-thr-status"><span class="ws-state" '
+                f'style="background:{mark[2]};color:{mark[1]}">{mark[0]}</span></div></div>'
+            )
+        )(STATUS_MARKS.get(r.status, STATUS_MARKS["neutral"]))
+        for r in rows
+    )
+    head = (
+        '<div class="ws-thr ws-thr-head"><div class="ws-thr-signal">Signal</div>'
+        '<div class="ws-thr-value">Value</div><div class="ws-thr-rule">Threshold</div>'
+        '<div class="ws-thr-status">Met</div></div>'
+    )
+    return card(head + body, style="padding:6px 16px 10px")
 
 
 def missing_notice(title: str, detail: str) -> str:

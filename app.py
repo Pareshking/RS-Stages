@@ -22,6 +22,7 @@ import streamlit.components.v1 as components
 from rs_stages.market import breadth_snapshot, industry_leadership
 from rs_stages.movers import rs_movers, transitions
 from rs_stages.quant import ma_10w_series, ma_30w_series
+from rs_stages import signal_card
 from rs_stages.screener import TREND_HEALTH_CONDITIONS
 from rs_stages.ui import charts
 from rs_stages.ui import components as ui
@@ -57,6 +58,8 @@ VIEWS = ["Dashboard", "Screener", "Industries", "Market", "Movers", "Stock", "Me
 STAGE_ORDER = ["Stage 2", "Stage 3", "Stage 4", "Stage 1"]
 ACTION_ORDER = ["BUY★", "BUY", "HOLD", "WAIT", "WATCH★", "WATCH", "REDUCE", "SELL", "AVOID"]
 PAGE_SIZE = 50
+#: Transition rows shown inline before the rest moves behind an expander.
+MOVERS_INLINE = 25
 
 
 def write(markup: str) -> None:
@@ -341,6 +344,7 @@ def page_dashboard() -> None:
                         len(rows),
                         color,
                         [(r["Symbol"], f"RS {fmt_rs(r.get('RS_Score'))}") for _, r in rows.iterrows()],
+                        more_href="?view=Movers",
                     )
                 )
             write(
@@ -486,6 +490,16 @@ def page_screener() -> None:
 
 
 # --- Industries -------------------------------------------------------------
+INDUSTRY_SORTS = {
+    "Median RS (high to low)": ("Median_RS", False),
+    "Median RS (low to high)": ("Median_RS", True),
+    "Participation": ("Participation_Pct", False),
+    "Median 3-month return": ("Median_R3M", False),
+    "Stocks (most first)": ("Stocks", False),
+    "Industry (A–Z)": ("Industry", True),
+}
+
+
 def page_industries() -> None:
     heading(
         "Industry strength",
@@ -509,7 +523,44 @@ def page_industries() -> None:
         )
     )
     st.write("")
-    write(ui.industry_table(industries))
+
+    controls = st.columns([2, 2])
+    sort_label = controls[0].selectbox("Sort by", list(INDUSTRY_SORTS), key="industry_sort")
+    names = ["None"] + industries["Industry"].astype(str).tolist()
+    selected = controls[1].selectbox("Show stocks in", names, key="industry_pick")
+
+    column, ascending = INDUSTRY_SORTS[sort_label]
+    if column in industries.columns:
+        industries = industries.sort_values(column, ascending=ascending, na_position="last")
+    write(ui.industry_table(industries.reset_index(drop=True)))
+
+    # Drill-down: the constituents of one industry, without leaving the page.
+    if selected and selected != "None":
+        members = DATA[DATA["Industry"].astype(str) == selected]
+        members = members.sort_values("RS_Score", ascending=False, na_position="last")
+        st.write("")
+        stage_counts = {
+            f"Stage {n}": int((members["Stage_Label"] == f"Stage {n}").sum()) for n in (1, 2, 3, 4)
+        }
+        write(
+            f'<div class="ws-eyebrow" style="margin-bottom:8px">{ui.esc(selected)} · '
+            f'{len(members):,} stocks</div>'
+        )
+        write(ui.card(ui.posture_bar(stage_counts, f"Stage posture in {selected}")))
+        st.write("")
+        write(
+            ui.screener_table(
+                members.head(PAGE_SIZE), cached_sparklines(), sorted_by="rs"
+            )
+        )
+        if len(members) > PAGE_SIZE:
+            write(
+                f'<div class="ws-note" style="margin-top:8px">Showing the '
+                f'{PAGE_SIZE} highest-RS names. '
+                f'<a target="_self" href="?view=Screener&industry='
+                f'{html.escape(selected, quote=True)}" style="color:var(--ink);font-weight:600">'
+                f"Open all {len(members):,} in the Screener →</a></div>"
+            )
 
 
 # --- Market -----------------------------------------------------------------
@@ -654,6 +705,10 @@ def page_movers() -> None:
             else CAUTION
         )
         st.write("")
+        # Every member is reachable. The first page is inline; the remainder
+        # goes behind an expander so a group of a hundred names does not bury
+        # the groups beneath it.
+        head, tail = rows.head(MOVERS_INLINE), rows.iloc[MOVERS_INLINE:]
         write(
             ui.card(
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;flex-wrap:wrap">'
@@ -661,10 +716,13 @@ def page_movers() -> None:
                 f'<span class="num" style="font-size:12.5px;color:var(--faint)">{len(rows)}</span>'
                 f'<span style="margin-left:auto;font-size:12px;color:var(--sub)">'
                 f'{ui.esc(payload["description"])}</span></div>'
-                + ui.transition_rows(rows.head(25), kind),
+                + ui.transition_rows(head, kind),
                 style="padding:14px 16px 8px",
             )
         )
+        if not tail.empty:
+            with st.expander(f"Show the remaining {len(tail):,} in “{label}”"):
+                write(ui.card(ui.transition_rows(tail, kind), style="padding:4px 16px 8px"))
 
     movers = rs_movers(DATA, SNAP.previous, count=12)
     if not movers.empty:
@@ -848,59 +906,119 @@ def page_stock() -> None:
         )
     )
 
-    # Full evidence, as docs/ACTION_SPEC.md section 5 requires.
+    # The Signal Card — section 4 of the NSE Signal Interpretation Guide's
+    # "Option B" display: the interpretation label on top, and every component
+    # that produced it visible underneath. The guide's own framing is that the
+    # label is a filter and the evidence panel is the decision, so the notes
+    # below state what a WAIT is waiting for, where the signals disagree, and
+    # the risk the label alone misses.
     st.write("")
-    evidence = pd.DataFrame(
-        {
-            "Field": [
-                "Decision date (latest completed session)",
-                "Stage",
-                "RS score / band",
-                "R3M / R6M / R9M / R12M",
-                "RS blend",
-                "30-week MA",
-                "30-week MA slope (10 sessions)",
-                "10-week MA",
-                "52-week high",
-                "Within 3% of the 52-week high",
-                "Volume ratio (vs prior-50 baseline)",
-                "U/D (20 sessions)",
-                "Distribution / heavy distribution",
-                "50-session MA",
-                "Below the 50-session MA",
-                "Extended beyond 20%",
-                "Breakout setup",
-                "Breakout confirmed",
-                "20-session traded value",
-                "Liquid (UI filter only)",
-            ],
-            "Value": [
-                fmt_date(row.get("Date")),
-                stage_display(stage),
-                f"{fmt_rs(row.get('RS_Score'))} · {band}",
-                " / ".join(fmt_return(row.get(k)) for k in ("R3M", "R6M", "R9M", "R12M")),
-                fmt_number(row.get("RS_Blend"), 4),
-                fmt_price(row.get("MA_30W")),
-                fmt_pct(row.get("MA_30W_Slope_10S_Pct"), 2),
-                fmt_price(row.get("MA_10W")),
-                fmt_price(row.get("High_52W")),
-                "Yes" if bool(row.get("Near_52W_High")) else "No",
-                fmt_ratio(row.get("Volume_Ratio")),
-                fmt_ratio(row.get("U_D")),
-                f"{'Yes' if bool(row.get('Distribution')) else 'No'} / "
-                f"{'Yes' if bool(row.get('Heavy_Distribution')) else 'No'}",
-                fmt_price(row.get("SMA_50")),
-                "Yes" if bool(row.get("Below_50DMA")) else "No",
-                "Yes" if bool(row.get("Extended_20Pct")) else "No",
-                "Yes" if bool(row.get("Breakout")) else "No",
-                "Yes" if bool(row.get("Breakout_Confirmed")) else "No",
-                fmt_inr(row.get("AvgValue20")),
-                "Yes" if bool(row.get("Liquid_UI_Filter")) else "No",
-            ],
-        }
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Signal card</div>')
+
+    ext_band, ext_tone = signal_card.extension_band(row.get("Ext_Pct"))
+    stage_tone = {"Stage 2": "good", "Stage 3": "warn", "Stage 4": "bad"}.get(
+        theme.stage_key(stage), "neutral"
     )
-    write('<div class="ws-eyebrow" style="margin-bottom:8px">Every input behind this Action</div>')
-    st.dataframe(evidence, hide_index=True, use_container_width=True, height=740)
+    ud_value = to_float(row.get("U_D"))
+    lines = "".join(
+        [
+            ui.signal_line("Stage", stage_display(stage), stage_tone),
+            ui.signal_line(
+                "Relative strength",
+                signal_card.rs_percentile_text(row.get("RS_Score")),
+                "good" if to_float(row.get("RS_Score")) >= 80 else "neutral",
+            ),
+            ui.signal_line(
+                "Volume",
+                f"{fmt_ratio(row.get('Volume_Ratio'))} average · U/D "
+                f"{fmt_ratio(row.get('U_D'))} — {signal_card.volume_state(row)}",
+                "bad" if ud_value < 0.7 else ("good" if ud_value > 1.3 else "neutral"),
+            ),
+            ui.signal_line(
+                "Extension",
+                f"{fmt_pct(row.get('Ext_Pct'))} above the 30-week line — {ext_band}",
+                ext_tone,
+            ),
+        ]
+    )
+    notes = "".join(
+        [
+            ui.signal_note("wait", signal_card.wait_note(row, action)),
+            ui.signal_note("conflict", signal_card.conflict_note(row)),
+            ui.signal_note("caution", signal_card.caution_note(row)),
+            ui.signal_note("source", signal_card.source_line(row)),
+        ]
+    )
+    write(ui.card(lines + notes))
+
+    st.write("")
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Every signal against its threshold</div>')
+    write(ui.threshold_table(signal_card.signal_rows(row)))
+
+    # The remaining locked fields the Action spec requires exposed, grouped by
+    # the measure each belongs to rather than dumped as one flat list.
+    st.write("")
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Calculation detail</div>')
+    write(
+        ui.evidence_grid(
+            [
+                ui.evidence_card(
+                    "Leadership",
+                    [
+                        ("RS blend", fmt_number(row.get("RS_Blend"), 4),
+                         "0.40×3M + 0.20×6M + 0.20×9M + 0.20×12M, before ranking."),
+                        ("3M / 6M", " / ".join(fmt_return(row.get(k)) for k in ("R3M", "R6M")),
+                         "Calendar-month returns to the latest completed session."),
+                        ("9M / 12M", " / ".join(fmt_return(row.get(k)) for k in ("R9M", "R12M")),
+                         "Referenced to the last session on or before each calendar date."),
+                    ],
+                ),
+                ui.evidence_card(
+                    "Trend structure",
+                    [
+                        ("30-week line", fmt_price(row.get("MA_30W")),
+                         "Average of every valid session in a 30-calendar-week window."),
+                        ("10-week line", fmt_price(row.get("MA_10W")),
+                         "Same construction, shorter window. Not a Stage input."),
+                        ("50-session average", fmt_price(row.get("SMA_50")),
+                         "Mean close over the latest 50 completed sessions."),
+                        ("Below the 50-session average", ui.state_pill(row.get("Below_50DMA"), "warn"),
+                         "A timing warning; it does not reclassify Stage."),
+                    ],
+                ),
+                ui.evidence_card(
+                    "52-week range",
+                    [
+                        ("52-week high", fmt_price(row.get("High_52W")),
+                         "Maximum adjusted High over 52 calendar weeks, 200 sessions minimum."),
+                        ("52-week low", fmt_price(row.get("Low_52W")),
+                         "Minimum adjusted Low over the same window."),
+                        ("Breakout setup", ui.state_pill(row.get("Breakout"), "good"),
+                         "Stage 2, within 3% of the high, volume ratio above 1.5."),
+                        ("Confirmed", ui.state_pill(row.get("Breakout_Confirmed"), "good"),
+                         "The setup, plus U/D above 1.3. Never collapsed into one state."),
+                    ],
+                ),
+                ui.evidence_card(
+                    "Liquidity",
+                    [
+                        ("20-session traded value", fmt_inr(row.get("AvgValue20")),
+                         "Mean of close × raw volume over the latest 20 completed sessions."),
+                        ("Liquid", ui.state_pill(row.get("Liquid_UI_Filter"), "neutral"),
+                         "Above ₹5 crore. A screener filter only; it never re-ranks RS."),
+                        ("Decision date", fmt_date(row.get("Date")),
+                         "The latest completed session before the upcoming decision session."),
+                    ],
+                ),
+            ]
+        )
+    )
+    write(
+        '<div class="ws-note" style="margin-top:12px">Action interprets this evidence; it never '
+        "replaces or hides it. Stage describes where price sits against its own 30-week line. "
+        "Relative strength describes how the stock ranks against the rest of the universe. A "
+        "stock can turn up structurally while still lagging, and the card says so.</div>"
+    )
 
 
 def _stock_chart(symbol: str, row: pd.Series) -> None:

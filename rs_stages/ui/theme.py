@@ -306,6 +306,33 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-inum{width:72px;text-align:right;font-size:12.5px;flex-shrink:0}
 @media (max-width:640px){.ws-iname{flex:1 1 auto}.ws-irs{flex:0 0 auto;min-width:0}}
 
+/* --- signal card (guide Option B) ---------------------------------------- */
+.ws-sigline{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--rule)}
+.ws-sigline:last-child{border-bottom:0}
+.ws-sigline-label{font-size:12.5px;color:var(--sub);font-weight:600}
+.ws-sigline-value{font-size:13.5px;font-weight:700;text-align:right}
+.ws-signote{border:1px solid;border-radius:10px;padding:10px 13px;margin-top:9px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
+.ws-signote-title{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;flex-shrink:0}
+.ws-signote-body{font-size:12.5px;color:var(--ink);line-height:1.55;flex:1 1 220px;min-width:0}
+.ws-thr{display:grid;grid-template-columns:1.6fr 0.8fr 1.5fr 44px;gap:12px;align-items:center;padding:11px 4px;border-top:1px solid var(--rule)}
+.ws-thr-head{border-top:none;font-size:11.5px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.4px;padding:8px 4px 6px}
+.ws-thr-signal{font-size:13px;font-weight:600;min-width:0}
+.ws-thr-note{font-size:10.5px;color:var(--faint);font-weight:400;line-height:1.4;margin-top:2px}
+.ws-thr-value{font-size:13.5px;font-weight:700}
+.ws-thr-rule{font-size:11.5px;color:var(--sub)}
+.ws-thr-status{text-align:right}
+@media (max-width:760px){.ws-thr{grid-template-columns:1.4fr 0.9fr 36px}.ws-thr-rule{display:none}.ws-thr-head .ws-thr-rule{display:none}}
+
+/* --- evidence cards ------------------------------------------------------ */
+.ws-ev{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--rule)}
+.ws-ev:last-child{border-bottom:0;padding-bottom:0}
+.ws-ev-label{font-size:12.5px;color:var(--ink);min-width:0}
+.ws-ev-note{font-size:10.5px;color:var(--faint);line-height:1.45;margin-top:2px}
+.ws-ev-value{font-size:13.5px;font-weight:700;text-align:right;white-space:nowrap;flex-shrink:0}
+.ws-state{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.ws-ev-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.ws-ev-grid{grid-template-columns:1fr}.ws-ev{gap:10px}}
+
 /* --- checklist / evidence ----------------------------------------------- */
 .ws-check{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--rule);font-size:13px}
 .ws-check:last-child{border-bottom:0}
