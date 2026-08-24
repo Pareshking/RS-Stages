@@ -36,27 +36,25 @@ def test_acquire_universe_histories_downloads_every_nse_symbol(monkeypatch, tmp_
     calls = []
     fake_data = {"AAA": _history(), "BBB": _history()}
 
-    def fake_download(symbol, start, end):
-        calls.append((symbol, start, end))
-        return fake_data[symbol]
+    def fake_bulk(symbols, start, end, batch_size):
+        calls.append((symbols, start, end, batch_size))
+        return fake_data
 
-    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_history", fake_download)
+    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_histories", fake_bulk)
     got = acquire_universe_histories(csv, "2025-01-01", "2026-01-06")
     assert list(got) == ["AAA", "BBB"]
-    assert calls == [("AAA", "2025-01-01", "2026-01-06"), ("BBB", "2025-01-01", "2026-01-06")]
+    assert calls == [(["AAA", "BBB"], "2025-01-01", "2026-01-06", 100)]
 
 
 def test_acquire_universe_histories_fails_closed_on_any_symbol(monkeypatch, tmp_path):
     csv = tmp_path / "nse.csv"
     pd.DataFrame({"Symbol": ["AAA", "BBB"], "Industry": ["A", "B"]}).to_csv(csv, index=False)
 
-    def fake_download(symbol, start, end):
-        if symbol == "BBB":
-            raise ValueError("provider failure")
-        return _history()
+    def fake_bulk(symbols, start, end, batch_size):
+        raise RuntimeError("Bulk market-data acquisition failed for symbols: {'BBB.NS': 'ValueError: provider failure'}")
 
-    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_history", fake_download)
-    with pytest.raises(RuntimeError, match="Market-data acquisition failed"):
+    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_histories", fake_bulk)
+    with pytest.raises(RuntimeError, match="Bulk market-data acquisition failed"):
         acquire_universe_histories(csv, "2025-01-01", "2026-01-06")
 
 
@@ -64,8 +62,13 @@ def test_acquire_and_build_applies_pre_market_boundary(monkeypatch, tmp_path):
     csv = tmp_path / "nse.csv"
     pd.DataFrame({"Symbol": ["AAA"], "Industry": ["A"]}).to_csv(csv, index=False)
     data = _history(periods=5)
-    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_history", lambda *args, **kwargs: data)
-    result = acquire_and_build_universe_snapshots(csv, "2025-01-01", "2026-01-06", pd.Timestamp("2026-01-05"))
+    monkeypatch.setattr(
+        "rs_stages.pipeline.download_yfinance_histories",
+        lambda symbols, start, end, batch_size: {"AAA": data},
+    )
+    result = acquire_and_build_universe_snapshots(
+        csv, "2025-01-01", "2026-01-06", pd.Timestamp("2026-01-05")
+    )
     assert result.snapshots["AAA"].latest_completed_session == pd.Timestamp("2026-01-04")
     assert pd.Timestamp("2026-01-05") not in result.snapshots["AAA"].data.index
 
@@ -77,11 +80,11 @@ def test_acquisition_never_requests_dummy_symbols(monkeypatch, tmp_path):
     ).to_csv(csv, index=False)
     requested = []
 
-    def fake_download(symbol, start, end):
-        requested.append(symbol)
-        return _history()
+    def fake_bulk(symbols, start, end, batch_size):
+        requested.extend(symbols)
+        return {"ABC": _history(), "XYZ": _history()}
 
-    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_history", fake_download)
+    monkeypatch.setattr("rs_stages.pipeline.download_yfinance_histories", fake_bulk)
     histories = acquire_universe_histories(csv, "2026-08-01", "2026-08-24")
     assert requested == ["ABC", "XYZ"]
     assert set(histories) == {"ABC", "XYZ"}
