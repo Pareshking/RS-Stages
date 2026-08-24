@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import math
+from urllib.parse import quote
 from typing import Any, Iterable, Sequence
 
 import pandas as pd
@@ -39,9 +40,21 @@ def esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
 
+def query_href(**params: Any) -> str:
+    """Build an in-app link from query parameters.
+
+    Values are URL-encoded before being HTML-escaped. html.escape alone is not
+    enough: it turns "&" into "&amp;" for the attribute but leaves it a
+    parameter separator for the browser, so an industry named
+    "Metals & Mining" would arrive truncated at the ampersand and match nothing.
+    """
+    query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items() if v is not None)
+    return html.escape(f"?{query}", quote=True)
+
+
 def stock_href(symbol: Any) -> str:
-    """Link into the Stock view for a symbol, via query parameters."""
-    return f"?view=Stock&symbol={html.escape(str(symbol), quote=True)}"
+    """Link into the Stock view for a symbol."""
+    return query_href(view="Stock", symbol=symbol)
 
 
 # --- small parts ------------------------------------------------------------
@@ -515,8 +528,9 @@ def industry_table(frame: pd.DataFrame) -> str:
         rows.append(
             f'<div class="ws-irow">'
             f'<span class="ws-irank num">{rank}</span>'
-            f'<div class="ws-iname"><a target="_self" href="?view=Screener&industry='
-            f'{html.escape(str(row.get("Industry")), quote=True)}">{esc(row.get("Industry"))}</a>'
+            f'<div class="ws-iname"><a target="_self" '
+            f'href="{query_href(view="Industries", industry=row.get("Industry"))}">'
+            f'{esc(row.get("Industry"))}</a>'
             f'<div class="sub num">{_plural(to_float(row.get("Stocks")), "stock")}</div></div>'
             f'<div class="ws-irs"><div class="ws-irs-track col-hide-sm">'
             f'<div class="ws-irs-fill bar-grow" style="width:{width:.1f}%;background:{color}"></div></div>'

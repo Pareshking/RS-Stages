@@ -123,9 +123,12 @@ if "symbol" not in st.session_state:
     requested = st.query_params.get("symbol")
     known = set(DATA["Symbol"].astype(str))
     st.session_state["symbol"] = requested if requested in known else _top_symbol()
+_INDUSTRIES = sorted(DATA["Industry"].dropna().astype(str).unique().tolist())
+_REQUESTED_INDUSTRY = _initial("industry", _INDUSTRIES, "")
 if "screener_industry" not in st.session_state:
-    industries = sorted(DATA["Industry"].dropna().astype(str).unique().tolist())
-    st.session_state["screener_industry"] = _initial("industry", industries + ["All"], "All")
+    st.session_state["screener_industry"] = _REQUESTED_INDUSTRY or "All"
+if "industry_pick" not in st.session_state:
+    st.session_state["industry_pick"] = _REQUESTED_INDUSTRY or "None"
 
 
 # --- header -----------------------------------------------------------------
@@ -292,7 +295,7 @@ def page_dashboard() -> None:
         top = industries.head(6)
         chips = "".join(
             f'<a class="ws-pill-link pop" target="_self" '
-            f'href="?view=Screener&industry={html.escape(str(row["Industry"]), quote=True)}">'
+            f'href="{ui.query_href(view="Industries", industry=row["Industry"])}">'
             f'<span class="sym">{ui.esc(row["Industry"])}</span>'
             f'<span class="meta num">RS {fmt_rs(row["Median_RS"])}</span></a>'
             for _, row in top.iterrows()
@@ -557,8 +560,8 @@ def page_industries() -> None:
             write(
                 f'<div class="ws-note" style="margin-top:8px">Showing the '
                 f'{PAGE_SIZE} highest-RS names. '
-                f'<a target="_self" href="?view=Screener&industry='
-                f'{html.escape(selected, quote=True)}" style="color:var(--ink);font-weight:600">'
+                f'<a target="_self" href="{ui.query_href(view="Screener", industry=selected)}" '
+                f'style="color:var(--ink);font-weight:600">'
                 f"Open all {len(members):,} in the Screener →</a></div>"
             )
 

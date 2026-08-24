@@ -152,9 +152,34 @@ def independent_ud(close: pd.Series, volume: pd.Series, decision: pd.Timestamp) 
     return up_sum / down_sum
 
 
+#: NSE closes at 15:30 IST. A run after this hour may treat the session that
+#: just finished as complete; a run before it may not.
+NSE_CLOSE_HOUR_IST = 16
+
+
+def default_decision_date(now_ist: pd.Timestamp) -> pd.Timestamp:
+    """The session this run is deciding for.
+
+    Decisions are pre-market for an upcoming session, and the boundary rule uses
+    the latest completed session strictly before that date. So the decision date
+    must be the *next* session for the run to use the freshest close.
+
+    Run after the NSE close, today's session is complete, so the decision is for
+    tomorrow and today's close is the terminal information date. Run before the
+    close, today is still in progress and must not enter any calculation, so the
+    decision is for today and yesterday's close is terminal.
+
+    Without this, a run at 23:30 IST would set the decision to today and
+    therefore use *yesterday's* close, discarding a completed session that has
+    been available for eight hours.
+    """
+    today = now_ist.tz_localize(None).normalize()
+    return today + pd.Timedelta(days=1) if now_ist.hour >= NSE_CLOSE_HOUR_IST else today
+
+
 def resolve_dates(decision_arg: str | None, start_arg: str | None, end_arg: str | None) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
     now_ist = pd.Timestamp.now(tz="Asia/Kolkata")
-    decision = pd.Timestamp(decision_arg) if decision_arg else now_ist.tz_localize(None).normalize()
+    decision = pd.Timestamp(decision_arg) if decision_arg else default_decision_date(now_ist)
     start = pd.Timestamp(start_arg) if start_arg else decision - pd.Timedelta(days=500)
     end = pd.Timestamp(end_arg) if end_arg else decision + pd.Timedelta(days=1)
     if start >= end:
