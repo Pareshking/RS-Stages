@@ -6,6 +6,7 @@ import pytest
 
 from rs_stages.data import (
     build_decision_snapshot,
+    download_yfinance_histories,
     download_yfinance_history,
     latest_completed_session,
     load_nse_constituents_csv,
@@ -121,6 +122,48 @@ def test_download_yfinance_history_rejects_missing_required_column(monkeypatch):
 
     with pytest.raises(ValueError, match="Missing required market columns"):
         download_yfinance_history("ABC", "2026-08-01", "2026-08-24")
+
+
+def test_bulk_yfinance_acquisition_uses_bounded_batch_and_preserves_each_ticker(monkeypatch):
+    calls = []
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
+    tickers = ["ABC.NS", "XYZ.NS"]
+    columns = pd.MultiIndex.from_product([tickers, ["Close", "High", "Volume"]])
+    source = pd.DataFrame(
+        [
+            [110.0, 115.0, 1000, 210.0, 215.0, 2000],
+            [112.0, 118.0, 1200, 212.0, 218.0, 2200],
+        ],
+        index=idx,
+        columns=columns,
+    )
+
+    def fake_download(**kwargs):
+        calls.append(kwargs)
+        return source.copy()
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(download=fake_download))
+    got = download_yfinance_histories(["ABC", "XYZ"], "2026-08-01", "2026-08-24", batch_size=100)
+
+    assert len(calls) == 1
+    assert calls[0]["tickers"] == tickers
+    assert calls[0]["auto_adjust"] is True
+    assert calls[0]["actions"] is False
+    assert calls[0]["threads"] is True
+    assert calls[0]["group_by"] == "ticker"
+    assert set(got) == {"ABC", "XYZ"}
+    assert got["ABC"].loc[pd.Timestamp("2026-08-21"), "Volume"] == 1200
+    assert got["XYZ"].loc[pd.Timestamp("2026-08-21"), "Volume"] == 2200
+
+
+def test_bulk_yfinance_acquisition_fails_on_partial_batch(monkeypatch):
+    idx = pd.DatetimeIndex(["2026-08-20"])
+    columns = pd.MultiIndex.from_product([["ABC.NS"], ["Close", "High", "Volume"]])
+    source = pd.DataFrame([[110.0, 115.0, 1000]], index=idx, columns=columns)
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(download=lambda **kwargs: source.copy()))
+
+    with pytest.raises(RuntimeError, match="Bulk market-data acquisition failed"):
+        download_yfinance_histories(["ABC", "XYZ"], "2026-08-01", "2026-08-24")
 
 
 def test_nse_csv_ingestion_preserves_symbols_and_industry(tmp_path):
