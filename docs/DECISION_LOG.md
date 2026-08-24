@@ -18,4 +18,17 @@
 14. **Pre-market information boundary:** decisions are made before the upcoming session opens; all calculations terminate at the latest completed NSE session. The upcoming/incomplete session can never enter a signal.
 15. 10-trading-session MA slope is locked as `(MA_today / MA_10_sessions_ago - 1) × 100`.
 
+## 2026-08-24 — Guide v2 supersedes early Action/UI specifications
+
+1. The supplied NSE Signal Interpretation Guide is adopted as the production interpretation/action reference.
+2. RS interpretation bands are now 80–99 leadership, 50–79 adequate, and <50 lagging. The former UI thresholds RS 85/70 are retired.
+3. Production Action vocabulary is now `BUY★`, `BUY`, `HOLD`, `WAIT`, `WATCH★`, `WATCH`, `REDUCE`, `SELL`, `AVOID`.
+4. Stage takes precedence over RS in conflicts: Stage 4 = SELL; Stage 3 = SELL when RS <50 otherwise REDUCE; Stage 1 maps to WATCH★/WATCH/AVOID by RS band.
+5. Stage 2 uses the guide's RS bands, distribution warning, >20% extension timing warning, below-50DMA timing warning, breakout and confirmed-breakout states.
+6. Extension is operationalized as Close > 1.20 × 30W MA; 50DMA is the 50-session simple moving average of Close.
+7. Pullback/volume-drying is not fabricated without a validated quantitative definition.
+8. Action logic is implemented in `rs_stages/actions.py`, separated from the quantitative engine.
+9. The UI is upgraded to a six-area research platform: Dashboard, Screener, Industries, Movers, Stock, Methodology, with subtle semantic colours and TradingView Lightweight Charts driven by repository data.
+10. The Action column is the final decision column in the screener and stock pages expose the underlying evidence and exact Action reason.
+
 Locked decisions may only be changed through a new documented decision/audit item supported by evidence.
