@@ -1,6 +1,6 @@
 # RS-Stages — Locked Quantitative & Decision Specification
 
-**Status:** LOCKED — v2.1  
+**Status:** LOCKED — v2.2  
 **Date:** 2026-08-24  
 **Repository:** `Pareshking/RS-Stages`  
 **Primary technology:** Streamlit
@@ -137,6 +137,13 @@ TT8  RS_Score >= 70
 Trend_Template_Score = count of TT1..TT8 satisfied
 Trend_Template_Pass  = all eight satisfied
 ```
+
+A session average is the mean of the latest N closes that **exist**. Sessions the
+provider left empty are dropped before the window is taken, never averaged
+around inside a fixed N-slot slice: that would report the mean of N-1
+observations as an N-session average and hide the shortfall, which §3 forbids.
+A calendar-window average needs no such rule because its bounds are dates, so a
+gap inside it changes nothing.
 
 **SMA_150 and SMA_200 are new session-based simple moving averages and are NOT
 the existing `MA_30W`.** §5 locks the 30-week average as a *calendar-week*
@@ -595,3 +602,36 @@ Additive only. No v2.0 definition was altered:
 RS, Stage, the 52-week high, volume ratio, U/D, breakout, confirmation, the
 timing warnings, liquidity and the nine-label Action framework are byte-for-byte
 unchanged.
+
+
+## 17. v2.2 change summary
+
+Additive only. No v2.0 or v2.1 definition was altered.
+
+- Added §4.1 (the RS line and its divergence), §5.1 (the Minervini trend
+  template), §10.4 (ATR), §10.5 (volatility contraction and volume dry-up),
+  §10.6 (the base pivot) and §11.1 (Stage 1 readiness).
+- Added Minervini to the §1 authority hierarchy, with the rule that a numeric
+  criterion is implemented verbatim and attributed while a qualitative pattern
+  gets a detector labelled as ours.
+- Resolved §10.3, held open through v2.1 for want of a precise definition, by
+  sourcing the concept rather than inventing one.
+- Added 25 published snapshot fields. None is read by any decision rule: Stage,
+  RS ranking, the breakout tests and all nine Action labels are byte-for-byte
+  unchanged, and a test compares every v2.1 column with and without the new
+  benchmark input to prove it.
+
+Two corrections were forced by the first scheduled audit run, both older than
+v2.2 and neither previously triggered:
+
+- §3 — the information boundary is the latest session carrying a Close, not the
+  latest row the provider emitted. A dated row published before its values are
+  final is not a completed session, and adopting one shifted every calendar
+  window a session late.
+- §5.1 — a session-count average is the mean of the latest N closes that exist.
+  Averaging whatever survives inside a fixed N-slot slice reported the mean of
+  N-1 observations as an N-session average. Calendar-window averages are
+  unaffected, being bounded by dates.
+
+The trend-template thresholds in §5.1 remain transcribed rather than verified
+against the source text, and are labelled provisional wherever they surface.
