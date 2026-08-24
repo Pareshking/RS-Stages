@@ -11,8 +11,15 @@
 
 1. Explicit project decisions in this v2 specification.
 2. The supplied NSE Signal Interpretation Guide for interpretation/action rules.
-3. Source books for their documented concepts: Weinstein stage structure and O'Neil RS/breakout principles.
+3. Source books for their documented concepts: Weinstein stage structure, O'Neil
+   RS/breakout principles, and — NEW v2.2 — Minervini's trend template and
+   volatility-contraction pattern.
 4. Clearly documented implementation assumptions.
+
+Where a book states a criterion numerically, it is implemented verbatim and
+attributed. Where a book describes a pattern qualitatively, any detector is an
+RS-Stages operationalization, labelled as such, and never attributed to the
+author as though it were their formula.
 
 No implementation may silently invent a missing mathematical definition. If the guide names a condition without enough information to calculate it, the condition remains explicitly unavailable until operationalized and tested.
 
@@ -55,6 +62,45 @@ No implementation may silently invent a missing mathematical definition. If the 
 
 The previous UI thresholds of RS 85/70 are retired.
 
+## 4.1 The RS line — NEW v2.2
+
+`RS_Score` is a cross-sectional percentile at one instant: it says where a stock
+ranks today, not what its strength has been doing. The RS *line* supplies the
+trajectory, and it is the one measure in this specification that can lead price.
+
+Definition, on the shared completed-session calendar:
+
+```
+RS_Line(t)          = Close(t) / Benchmark_Close(t)
+RS_Line_High_52W(T) = max RS_Line over the trailing 52 calendar weeks ending T
+RS_Line_At_High(T)  = RS_Line(T) >= RS_Line_High_52W(T) * (1 - 0.005)
+```
+
+The benchmark is `^CRSLDX`, already locked in §12.2 as reference data. Using it
+here does not promote it: no Stage, RS ranking or Action rule reads the RS line.
+
+The 0.5% tolerance exists because "at a new high" compared with `==` on floating
+point is a test that essentially never passes.
+
+**The divergence — O'Neil's leading tell.** When relative strength reaches a new
+high while price has not, the stock is outperforming inside its own base. That
+ordering is the signal:
+
+```
+RS_Line_NH_Before_Price(T) = RS_Line_At_High(T) and Pct_From_52W_High(T) <= -5.0
+```
+
+The concept is O'Neil's and attributed to him. The −5% floor separating "price
+has not yet made its high" from noise is an RS-Stages operationalization under
+§1, not a number O'Neil states.
+
+**Insufficiency.** The RS line requires benchmark closes across the full 52-week
+lookback on the stock's own session calendar. Where the benchmark is missing for
+a session, that session is excluded from the maximum; where fewer than 200
+sessions of overlap exist, `RS_Line_High_52W` and both flags are unavailable and
+published as such. No benchmark value is ever forward-filled, interpolated or
+substituted to complete the window.
+
 ## 5. Stage — 30W MA
 
 The 30W MA remains a **30-calendar-week SMA over all valid NSE sessions in the calendar window**, ending at T. It is not a fixed 150-row trading-day average.
@@ -71,6 +117,41 @@ Classification:
 - Stage 1 — Basing: Close ≤ MA and slope > 0.
 
 Stage is categorical; never treat stage numbers as arithmetic quantities.
+
+## 5.1 Minervini trend template — NEW v2.2
+
+Stated numerically in the source and implemented verbatim. Eight criteria, each
+published as its own boolean plus a 0–8 count, so a stock failing on one
+criterion is distinguishable from one failing on six.
+
+```
+TT1  Close > SMA_150 and Close > SMA_200
+TT2  SMA_150 > SMA_200
+TT3  SMA_200 rising over the trailing 21 completed sessions
+TT4  SMA_50 > SMA_150 and SMA_50 > SMA_200
+TT5  Close > SMA_50
+TT6  Close >= Low_52W * 1.30
+TT7  Close >= High_52W * 0.75
+TT8  RS_Score >= 70
+
+Trend_Template_Score = count of TT1..TT8 satisfied
+Trend_Template_Pass  = all eight satisfied
+```
+
+**SMA_150 and SMA_200 are new session-based simple moving averages and are NOT
+the existing `MA_30W`.** §5 locks the 30-week average as a *calendar-week*
+construction, deliberately, and 30 calendar weeks is not 150 trading sessions.
+Substituting one for the other would silently restate Minervini's criteria in
+another author's units. They coexist; neither is redefined.
+
+TT3 uses one month ≈ 21 completed sessions. The source prefers a longer
+confirmation (four to five months) but states one month as the minimum, so the
+minimum is what is tested and the stricter reading is left to the reader.
+
+**Threshold provenance.** The 30% (TT6), 25% (TT7) and 70 (TT8) figures are
+reproduced from the published trend template. They are transcribed, not derived,
+and should be checked against the source text before this section is treated as
+settled; every one of them is a single constant in `quant.py` for that reason.
 
 ## 6. 52-calendar-week high
 
@@ -211,9 +292,87 @@ The guide's **below 50DMA** condition is operationalized as the 50 completed-ses
 
 This is a timing warning, not a Stage reclassification.
 
-## 10.3 Pullback / volume drying
+## 10.3 Pullback / volume drying — RESOLVED v2.2
 
-The guide references pullback + volume drying as a buy-timing condition but does not supply a sufficiently precise quantitative definition in the repository adaptation. RS-Stages therefore does **not** fabricate a detector for this condition. It remains an explicit future specification item.
+Held open through v2.1: the guide named the condition without a definition
+precise enough to calculate, so no detector was fabricated.
+
+v2.2 closes it by sourcing the concept rather than inventing it. Minervini's
+volatility-contraction pattern is the documented treatment of contraction plus
+volume drying, and enters at authority level 3 alongside Weinstein and O'Neil.
+See §10.5. The distinction §1 draws applies in full: the trend template is
+numeric in the source and implemented verbatim; the contraction sequence is
+described qualitatively and its detector is ours, labelled as ours.
+
+## 10.4 Volatility — NEW v2.2
+
+```
+TrueRange(t) = max( High(t) - Low(t),
+                    |High(t) - Close(t-1)|,
+                    |Low(t)  - Close(t-1)| )
+ATR_14(T)    = mean TrueRange over the 14 completed sessions ending T
+ATR_Pct(T)   = ATR_14(T) / Close(T) * 100
+```
+
+Requires `Low`, which §9.1 already treats as optional in the provider frame.
+Where `Low` is absent `ATR_Pct` is unavailable and published as such; no
+high-minus-close proxy is substituted, because that is a different quantity.
+
+## 10.5 Volatility contraction and volume dry-up — NEW v2.2
+
+Closes the item §10.3 held open. The concept is Minervini's; **the detector below
+is an RS-Stages operationalization**. The source describes a sequence of
+successively tighter contractions with diminishing volume, illustrated by
+example rather than reduced to a formula, so §1 requires the formalization be
+labelled as ours and not presented as his.
+
+Base window: the trailing 50 completed sessions, split into five consecutive
+blocks of ten, oldest first.
+
+```
+Range_Pct(b)       = (max High in b - min Low in b) / mean Close in b * 100
+VCP_Contractions   = count of adjacent pairs with Range_Pct(b[i+1]) < Range_Pct(b[i])
+Contraction_Ratio  = Range_Pct(b[4]) / Range_Pct(b[0])
+Volume_DryUp       = mean Volume over the last 10 sessions
+                     / mean Volume over the 50 sessions preceding those 10
+```
+
+`Contraction_Ratio < 1` means the range is tightening; the source's rule of
+thumb that each contraction runs roughly half the previous corresponds to a
+ratio near 0.5 across the base. `Volume_DryUp < 1` means volume is drying.
+
+```
+VCP_Setup = Contraction_Ratio <= 0.60
+            and Volume_DryUp <= 0.80
+            and VCP_Contractions >= 2
+```
+
+Three thresholds, all ours, all single constants in `quant.py`.
+
+This measures something `Volume_Ratio` cannot. §7's ratio compares one session
+against a baseline and therefore detects the *spike* that confirms a breakout.
+`Volume_DryUp` compares a sustained recent window against a longer one and
+detects the *drought* that precedes it. They are deliberately opposite
+instruments and neither replaces the other.
+
+`Range_Pct` requires `Low`. Where it is absent the entire contraction group is
+unavailable, `VCP_Setup` included; it is never computed from High and Close
+alone.
+
+## 10.6 The pivot — NEW v2.2
+
+The buy point at the top of the base, and the distance still to travel.
+
+```
+VCP_Pivot    = max High over the trailing 50 completed sessions
+Pct_To_Pivot = (VCP_Pivot / Close - 1) * 100
+```
+
+`Pct_To_Pivot` is zero when the stock is making the high of its own base and
+negative once it has cleared it. This supersedes nothing: §6's `Near_52W_High`
+remains a 3% boolean against the 52-week high, a different and longer reference.
+A stock can sit on its base pivot while far below its 52-week high, which is
+precisely the case a base-building screen must be able to see.
 
 ## 11. Production Action framework — NEW v2
 
@@ -256,6 +415,31 @@ The production Action vocabulary is now:
 **WAIT.**
 
 The complete deterministic mapping is documented separately in `docs/ACTION_SPEC.md` and implemented in `rs_stages/actions.py`.
+
+## 11.1 Stage 1 readiness — NEW v2.2
+
+§11 assigns every Stage 1 stock the same instruction: wait for the breakout.
+That is correct as an *action* and useless as a *ranking*. Stage 1 is the
+largest bucket in most sessions and contains both the bases about to resolve
+upward and stocks that are simply dead, and nothing published so far
+distinguishes them.
+
+`Stage1_Readiness` is a 0–5 count, defined only for Stage 1 rows and unavailable
+elsewhere:
+
+```
+R1  MA_30W_Slope_10S_Pct >= -0.10     the decline has stopped
+R2  RS_Score >= 50                    no longer lagging the universe
+R3  Contraction_Ratio <= 0.70         the range is tightening
+R4  Volume_DryUp <= 0.90              volume is drying
+R5  Close > MA_10W                    the shorter line has been reclaimed
+```
+
+**No locked signal consumes this field.** It ranks a bucket for reading order;
+it does not alter Stage, RS, breakout or any Action label, and a Stage 1 stock
+scoring 5 still carries the Stage 1 action. This mirrors the standing of the
+Signal Card bands in §12: presentation vocabulary over published numbers, never
+a new decision rule smuggled in through a score.
 
 ## 12. Action transparency
 
