@@ -22,10 +22,10 @@ from .quant import (
 
 
 def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
-    """Calculate locked RS/Stage fields before optional liquidity filtering.
+    """Calculate RS/Stage fields before optional liquidity filtering.
 
-    Symbols with insufficient mathematical history are retained in the output
-    with explicit NaNs/False signals rather than fabricated values.
+    The guide interpretation layer consumes only fields produced here or by
+    the validated stock-history path. Missing history remains explicit.
     """
     rows: list[dict] = []
 
@@ -73,13 +73,22 @@ def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
         except (ValueError, KeyError):
             row["U_D"] = float("nan")
 
-        # Liquidity is a UI-only filter but its mathematical input still
-        # requires 20 valid completed sessions; do not silently average fewer.
         value = (close * volume).loc[:t].dropna()
-        if len(value) >= 20:
-            row["AvgValue20"] = float(value.iloc[-20:].mean())
-        else:
-            row["AvgValue20"] = np.nan
+        row["AvgValue20"] = float(value.iloc[-20:].mean()) if len(value) >= 20 else np.nan
+
+        try:
+            close_50 = close.loc[:t].dropna()
+            row["SMA_50"] = float(close_50.iloc[-50:].mean()) if len(close_50) >= 50 else np.nan
+            row["Below_50DMA"] = bool(close.loc[t] < row["SMA_50"]) if pd.notna(row["SMA_50"]) else False
+        except (ValueError, KeyError):
+            row["SMA_50"] = np.nan
+            row["Below_50DMA"] = False
+
+        row["Extended_20Pct"] = bool(
+            pd.notna(row["MA_30W"]) and float(close.loc[t]) > 1.20 * float(row["MA_30W"])
+        )
+        row["Distribution"] = bool(pd.notna(row["U_D"]) and row["U_D"] < 0.7)
+        row["Heavy_Distribution"] = bool(pd.notna(row["U_D"]) and row["U_D"] < 0.6)
 
         row["Breakout"] = (
             breakout(
