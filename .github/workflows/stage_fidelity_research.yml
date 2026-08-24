@@ -1,0 +1,56 @@
+name: Stage Fidelity Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_size:
+        description: 'Number of non-DUMMY Total Market symbols to sample'
+        required: false
+        default: '60'
+        type: string
+      period:
+        description: 'Yahoo history period'
+        required: false
+        default: '3y'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run synthetic experiment
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python research/stage_fidelity_experiment.py
+
+      - name: Run real-data pilot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python research/stage_fidelity_real_data.py \
+            --universe data/ind_niftytotalmarket_list.csv \
+            --sample-size '${{ inputs.sample_size }}' \
+            --period '${{ inputs.period }}' \
+            --output stage_fidelity_real_data.csv
+
+      - name: Upload experiment output
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-fidelity-research
+          path: stage_fidelity_real_data.csv
+          retention-days: 30
