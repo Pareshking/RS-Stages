@@ -26,19 +26,7 @@ def _stage(value: Any) -> str:
 
 
 def action_for(row: Any) -> str:
-    """Return the guide action from existing quantitative outputs.
-
-    Operational definitions added by the project adaptation:
-    * ``Extended_20Pct`` is Close > 1.20 * 30W MA.
-    * ``Below_50DMA`` is supplied by the screener as the latest close below
-      its 50-session simple moving average.
-    * ``Distribution`` means U/D < 0.7, matching the guide's warning band.
-    * ``Heavy_Distribution`` means U/D < 0.6.
-
-    Pullback/volume-drying is not inferred when the snapshot does not expose a
-    dedicated, validated field; the engine therefore falls through to HOLD/WAIT
-    rather than fabricating a condition.
-    """
+    """Return the guide action from existing quantitative outputs."""
     stage = _stage(row.get("Stage"))
     rs = _num(row.get("RS_Score"))
     ud = _num(row.get("U_D"))
@@ -77,24 +65,36 @@ def action_for(row: Any) -> str:
 
 
 def action_reason(row: Any, action: str) -> str:
+    """Explain the exact decision precedence that produced an Action."""
     stage = _stage(row.get("Stage"))
     rs = _num(row.get("RS_Score"))
     ud = _num(row.get("U_D"))
     rs_text = "RS unavailable" if not math.isfinite(rs) else f"RS {rs:.0f}"
     ud_text = "U/D unavailable" if not math.isfinite(ud) else f"U/D {ud:.2f}"
 
-    reasons = {
-        "BUY★": f"{stage} + {rs_text}; breakout is confirmed and no guide timing warning is active.",
-        "BUY": f"{stage} + {rs_text}; breakout setup is present but confirmation is incomplete.",
-        "HOLD": f"{stage} + {rs_text}; trend/leadership is adequate without a stronger entry trigger.",
-        "WAIT": f"{stage} + {rs_text}; wait for the missing guide condition or improved timing.",
-        "WATCH★": f"{stage} + {rs_text}; high leadership, but the guide requires Stage 2 before buying.",
-        "WATCH": f"{stage} + {rs_text}; basing structure is not yet an entry condition.",
-        "REDUCE": f"{stage}; distribution/topping evidence ({ud_text}) weakens the position case.",
-        "SELL": f"{stage}; the guide treats this trend regime as an exit/avoid condition.",
-        "AVOID": f"{stage} + {rs_text}; weak leadership and basing structure do not qualify for ownership.",
-    }
-    return reasons.get(action, f"{stage} / {rs_text}; no action rule matched.")
+    if action == "SELL":
+        if stage == "Stage 4":
+            return "Stage 4 takes precedence: the guide requires SELL regardless of RS."
+        return f"{stage} + {rs_text}; RS below 50 in Stage 3 triggers SELL."
+    if action == "REDUCE":
+        if stage == "Stage 3":
+            return f"Stage 3 with {rs_text}; the guide requires REDUCE when RS is 50 or higher."
+        return f"{stage} + {rs_text}; distribution warning ({ud_text}) triggers REDUCE."
+    if action == "WATCH★":
+        return f"{stage} + {rs_text}; high leadership in a basing stage is WATCH★, not a buy."
+    if action == "WATCH":
+        return f"{stage} + {rs_text}; adequate RS in a basing stage remains WATCH."
+    if action == "AVOID":
+        return f"{stage} + {rs_text}; weak RS in a basing stage is AVOID."
+    if action == "WAIT":
+        return f"{stage} + {rs_text}; wait for the missing guide condition or improved timing."
+    if action == "BUY★":
+        return f"{stage} + {rs_text}; breakout is confirmed and no guide timing warning is active."
+    if action == "BUY":
+        return f"{stage} + {rs_text}; breakout setup is present but confirmation is incomplete."
+    if action == "HOLD":
+        return f"{stage} + {rs_text}; trend/leadership is adequate without a stronger entry trigger."
+    return f"{stage} / {rs_text}; no action rule matched."
 
 
 def with_actions(frame):

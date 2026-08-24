@@ -1,6 +1,6 @@
 import pandas as pd
 
-from rs_stages.actions import action_for
+from rs_stages.actions import action_for, action_reason
 
 
 def row(**kwargs):
@@ -55,3 +55,14 @@ def test_stage2_mid_rs_does_not_buy():
 
 def test_stage2_low_rs_waits():
     assert action_for(row(RS_Score=49)) == "WAIT"
+
+
+def test_action_reason_respects_stage3_precedence():
+    reason = action_reason(row(Stage="Stage 3 — Topping", RS_Score=90, U_D=0.5), "REDUCE")
+    assert "Stage 3" in reason
+    assert "RS is 50 or higher" in reason
+
+
+def test_action_reason_for_stage4_does_not_claim_distribution():
+    reason = action_reason(row(Stage="Stage 4 — Declining", RS_Score=99, U_D=2.0), "SELL")
+    assert "Stage 4 takes precedence" in reason

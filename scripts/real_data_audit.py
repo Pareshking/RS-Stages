@@ -11,7 +11,7 @@ from rs_stages.actions import with_actions
 from rs_stages.market import breadth_history_from_trends
 from rs_stages.pipeline import acquire_universe_histories
 from rs_stages.screener import analyze_universe, analyze_universe_with_trend
-from rs_stages.quant import rs_blend, rs_returns, classify_stage, calendar_asof
+from rs_stages.quant import rs_blend, rs_returns, calendar_asof
 from rs_stages.data import build_decision_snapshot, load_nse_constituents_csv
 
 #: Sessions of Close retained per symbol so the UI can draw price history and
@@ -42,6 +42,7 @@ def independent_rs(close: pd.Series, decision: pd.Timestamp) -> dict[int, float]
 
 
 def independent_stage(close: pd.Series, decision: pd.Timestamp) -> tuple[float, float, str]:
+    """Independently reproduce 30W MA, 10-session slope and Stage truth table."""
     s = close.sort_index().dropna()
     t = independent_calendar_asof(s.index, decision)
     start_ref = independent_calendar_asof(s.index, t - pd.Timedelta(weeks=30))
@@ -49,6 +50,7 @@ def independent_stage(close: pd.Series, decision: pd.Timestamp) -> tuple[float, 
     if len(window) < 2:
         raise ValueError("Insufficient history for independent 30W MA")
     ma = float(window.mean())
+
     ma_values = []
     for point in s.index:
         try:
@@ -68,7 +70,18 @@ def independent_stage(close: pd.Series, decision: pd.Timestamp) -> tuple[float, 
     if prior == 0:
         raise ValueError("Cannot calculate independent slope from zero prior MA")
     slope = (float(ma_series.iloc[pos]) / prior - 1.0) * 100.0
-    stage = classify_stage(float(s.loc[t]), ma, slope)
+
+    # Independent truth table: do not call production classify_stage().
+    above = float(s.loc[t]) > ma
+    rising = slope > 0.0
+    if above and rising:
+        stage = "Stage 2 — Advancing"
+    elif above and not rising:
+        stage = "Stage 3 — Topping"
+    elif not above and not rising:
+        stage = "Stage 4 — Declining"
+    else:
+        stage = "Stage 1 — Basing"
     return ma, slope, stage
 
 
@@ -190,7 +203,8 @@ def main() -> None:
             for m in (3, 6, 9, 12):
                 if not np.isclose(expected[m], actual[m], rtol=0, atol=1e-12):
                     failures.append(f"{symbol}: R{m}M mismatch")
-            if not np.isclose(rs_blend(expected), rs_blend(actual), rtol=0, atol=1e-12):
+            expected_blend = 0.40 * expected[3] + 0.20 * expected[6] + 0.20 * expected[9] + 0.20 * expected[12]
+            if not np.isclose(expected_blend, float(result.loc[symbol, "RS_Blend"]), rtol=0, atol=1e-12):
                 failures.append(f"{symbol}: RS blend mismatch")
         except ValueError:
             pass
@@ -315,7 +329,6 @@ def main() -> None:
     print(f"Yahoo history: {start.date()} to {end.date()} exclusive")
     print(f"Universe rows after DUMMY exclusion: {len(universe)}")
     print(f"Research rows: {len(result)}")
-    print(f"RS reconciliation failures: {len(failures)}")
     print(f"Independent checks: stage={checked_stage}, high52={checked_high}, volume={checked_volume}, ud={checked_ud}, liquidity={checked_liquidity}")
     print(f"Independent checks (v2.1): ma10w={checked_ma_10w}, low52={checked_low}, trend_panel={checked_trend}")
     print(f"Previous-session rows: {len(previous_result)}")
