@@ -395,8 +395,10 @@ def main() -> None:
                 start=pd.Timestamp(breadth["Date"].min()),
                 end=pd.Timestamp(breadth["Date"].max()) + pd.Timedelta(days=1),
             )
-            closes = index_history["Close"].astype(float)
-            aligned = closes.reindex(pd.DatetimeIndex(breadth["Date"]))
+            # Deliberately not named `closes`: that is the panel's 2-D grid,
+            # and shadowing it here silently broke the run summary.
+            benchmark_close = index_history["Close"].astype(float)
+            aligned = benchmark_close.reindex(pd.DatetimeIndex(breadth["Date"]))
             breadth["Benchmark_Close"] = aligned.to_numpy()
             breadth["Benchmark_Ticker"] = ticker
             covered = int(breadth["Benchmark_Close"].notna().sum())
@@ -416,7 +418,8 @@ def main() -> None:
     print(f"Independent checks: stage={checked_stage}, high52={checked_high}, volume={checked_volume}, ud={checked_ud}, liquidity={checked_liquidity}")
     print(f"Independent checks (v2.1): ma10w={checked_ma_10w}, low52={checked_low}, trend_panel={checked_trend}")
     print(f"Previous-session rows: {len(previous_result)}")
-    print(f"Price panel grid: {closes.shape[0]} sessions x {closes.shape[1]} symbols")
+    sessions_n, symbols_n = closes.shape
+    print(f"Price panel grid: {sessions_n} sessions x {symbols_n} symbols")
     print(f"Price panel size: {panel_path.stat().st_size / 1e6:.2f} MB (published as a release asset)")
     print(f"Breadth history sessions: {len(breadth)}")
     print(f"Action counts:\n{result['Action'].value_counts().to_string()}")
