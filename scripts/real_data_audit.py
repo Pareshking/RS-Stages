@@ -128,8 +128,17 @@ def independent_low52(low: pd.Series, decision: pd.Timestamp) -> float:
 
 
 def independent_sma(close: pd.Series, decision: pd.Timestamp, sessions: int) -> float:
-    """v2.2 §5.1 — session average by plain summation, no rolling window."""
-    values = [float(v) for stamp, v in close.sort_index().items() if stamp <= decision]
+    """v2.2 §5.1 — session average by plain summation, no rolling window.
+
+    Sessions without a Close are skipped, so this is the mean of the latest
+    ``sessions`` closes that exist — the same definition production applies by
+    dropping them before slicing, reached here by filtering the comprehension.
+    """
+    values = [
+        float(v)
+        for stamp, v in close.sort_index().items()
+        if stamp <= decision and pd.notna(v)
+    ]
     if len(values) < sessions:
         raise ValueError("insufficient history")
     window = values[-sessions:]
