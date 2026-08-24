@@ -8,17 +8,26 @@ import pandas as pd
 
 from rs_stages.pipeline import acquire_and_build_universe_snapshots
 from rs_stages.screener import analyze_universe
-from rs_stages.quant import calendar_asof, rs_blend, rs_returns
+from rs_stages.quant import rs_blend, rs_returns
+
+
+def independent_calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp:
+    """Resolve a calendar target independently of the production calendar helper."""
+    idx = pd.DatetimeIndex(index).sort_values().unique()
+    pos = idx.searchsorted(pd.Timestamp(target), side="right") - 1
+    if pos < 0:
+        raise ValueError("No completed session exists on or before target date")
+    return idx[pos]
 
 
 def independent_rs(close: pd.Series, decision: pd.Timestamp) -> dict[int, float]:
     """Independent reference implementation for the RS return/blend path."""
     s = close.sort_index().dropna()
-    t = calendar_asof(s.index, decision)
+    t = independent_calendar_asof(s.index, decision)
     latest = float(s.loc[t])
     out = {}
     for m in (3, 6, 9, 12):
-        ref = calendar_asof(s.index, t - pd.DateOffset(months=m))
+        ref = independent_calendar_asof(s.index, t - pd.DateOffset(months=m))
         out[m] = latest / float(s.loc[ref]) - 1.0
     return out
 
