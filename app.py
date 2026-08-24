@@ -17,7 +17,6 @@ import math
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from rs_stages.market import breadth_snapshot, industry_leadership
 from rs_stages.movers import rs_movers, transitions
@@ -694,7 +693,7 @@ def _line_chart(
             {"data": benchmark, "color": "#1a1d21", "dashed": True, "last_value": True,
              "scale": "right"}
         )
-    components.html(
+    st.iframe(
         charts.line_chart(
             series,
             element_id="breadth",
@@ -702,7 +701,6 @@ def _line_chart(
             unavailable="The participation trend could not be drawn in this environment.",
         ),
         height=296,
-        scrolling=False,
     )
 
 
@@ -1096,7 +1094,7 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
             style="padding:14px 16px 6px",
         )
     )
-    components.html(
+    st.iframe(
         charts.line_chart(
             [
                 {
@@ -1119,7 +1117,6 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
             unavailable="The price chart could not be drawn in this environment.",
         ),
         height=356,
-        scrolling=False,
     )
 
 

@@ -1,3 +1,20 @@
+[server]
+# The deployed app's source never changes while the process is running: a new
+# commit rebuilds the container. Watching local sources therefore buys nothing
+# and costs correctness.
+#
+# Streamlit 1.62's LocalSourcesWatcher reacts to a change by evicting the
+# watched package and every one of its submodules from sys.modules
+# (flush_pending_evictions). CPython's importlib._bootstrap._load ends with an
+# unguarded `module = sys.modules.pop(spec.name)`, so an eviction that lands
+# while another thread is midway through importing that package raises a bare
+# `KeyError: 'rs_stages'` in the importing thread. That is the error seen in the
+# deployment log, and it is a race, which is why it appeared once at boot and
+# not afterwards.
+#
+# Turning the watcher off removes the eviction, and with it the race.
+fileWatcherType = "none"
+
 [client]
 toolbarMode = "minimal"
 showErrorDetails = "viewer"
