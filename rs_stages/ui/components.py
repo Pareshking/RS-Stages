@@ -398,7 +398,23 @@ SCREENER_COLUMNS = {
     "ext": ("Ext %", "right", True),
     "range": ("52W range", "left", True),
     "r3m": ("3M", "right", True),
+    # --- v2.2 pre-breakout structure ---
+    "rsline": ("RS line", "left", False),
+    "contraction": ("Contraction", "right", True),
+    "dryup": ("Vol dry-up", "right", True),
+    "pivot": ("To pivot", "right", False),
+    "template": ("Template", "right", True),
+    "readiness": ("Readiness", "right", False),
+    "atr": ("ATR %", "right", True),
 }
+
+#: The pre-breakout view's columns. Deliberately omits Action: §11 assigns every
+#: Stage 1 stock the same label, so showing it beside a readiness ranking would
+#: imply the label were varying with the score. It is not.
+SETUP_COLUMNS = (
+    "symbol", "trend", "rs", "stage",
+    "rsline", "contraction", "dryup", "pivot", "readiness",
+)
 
 
 def _cell(key: str, row: pd.Series, trend: Sequence[float] | None) -> str:
@@ -431,6 +447,64 @@ def _cell(key: str, row: pd.Series, trend: Sequence[float] | None) -> str:
             f'<span class="num" style="color:{signed_color(to_float(value) )};font-weight:600">'
             f"{fmt_return(value)}</span>"
         )
+
+    # --- v2.2 ---------------------------------------------------------------
+    if key == "rsline":
+        # The divergence is the point, not the ratio's magnitude: a raw
+        # Close/Index number means nothing to a reader on its own.
+        if bool(row.get("RS_Line_NH_Before_Price")):
+            return (
+                f'<span style="color:{POSITIVE};font-weight:700">Leading</span>'
+                '<div class="ws-sub">new high before price</div>'
+            )
+        if bool(row.get("RS_Line_At_High")):
+            return '<span style="color:var(--ink);font-weight:600">At high</span>'
+        if math.isnan(to_float(row.get("RS_Line"))):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        return '<span style="color:var(--sub)">—</span>'
+    if key == "contraction":
+        value = to_float(row.get("Contraction_Ratio"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        color = POSITIVE if value <= 0.60 else ("var(--sub)" if value < 1.0 else NEGATIVE)
+        return f'<span class="num" style="color:{color};font-weight:600">{value:.2f}×</span>'
+    if key == "dryup":
+        value = to_float(row.get("Volume_DryUp"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        color = POSITIVE if value <= 0.80 else ("var(--sub)" if value < 1.2 else NEGATIVE)
+        return f'<span class="num" style="color:{color};font-weight:600">{value:.2f}×</span>'
+    if key == "pivot":
+        value = to_float(row.get("Pct_To_Pivot"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        if value <= 0:
+            return f'<span class="num" style="color:{POSITIVE};font-weight:600">through</span>'
+        color = POSITIVE if value <= 3.0 else "var(--sub)"
+        return f'<span class="num" style="color:{color};font-weight:600">+{value:.1f}%</span>'
+    if key == "template":
+        value = to_float(row.get("Trend_Template_Score"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        color = POSITIVE if value == 8 else ("var(--ink)" if value >= 6 else "var(--sub)")
+        return f'<span class="num" style="color:{color};font-weight:600">{int(value)}/8</span>'
+    if key == "readiness":
+        value = to_float(row.get("Stage1_Readiness"))
+        if math.isnan(value):
+            # Unavailable outside Stage 1, which is not the same as zero.
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        filled = int(value)
+        dots = "".join(
+            f'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+            f'margin-right:3px;background:{POSITIVE if i < filled else "var(--line)"}"></span>'
+            for i in range(5)
+        )
+        return f'<span class="num" style="font-weight:600">{dots} {filled}/5</span>'
+    if key == "atr":
+        value = to_float(row.get("ATR_Pct"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        return f'<span class="num" style="color:var(--sub);font-weight:600">{value:.1f}%</span>'
     return DASH
 
 
