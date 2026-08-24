@@ -14,7 +14,7 @@ import pandas as pd
 from .data import (
     DecisionSnapshot,
     build_decision_snapshot,
-    download_yfinance_history,
+    download_yfinance_histories,
     load_nse_constituents_csv,
 )
 
@@ -55,27 +55,20 @@ def acquire_universe_histories(
     start: str | pd.Timestamp,
     end: str | pd.Timestamp,
 ) -> dict[str, pd.DataFrame]:
-    """Acquire yfinance histories for every NSE universe symbol.
+    """Acquire yfinance histories for the complete NSE universe in bulk.
 
-    The NSE CSV remains the authority for the universe. A failed symbol is not
-    silently dropped; the acquisition fails explicitly so the caller cannot
-    accidentally calculate a partial universe.
+    The NSE CSV remains the authority for the universe. Bulk acquisition is
+    bounded into provider-safe batches, while the returned universe remains
+    strict: a missing/invalid symbol fails the acquisition rather than being
+    silently dropped.
     """
     constituents = load_nse_constituents_csv(constituents_csv)
-    histories: dict[str, pd.DataFrame] = {}
-    failures: dict[str, str] = {}
-
-    for symbol in constituents["Symbol"]:
-        key = str(symbol)
-        try:
-            histories[key] = download_yfinance_history(key, start=start, end=end)
-        except Exception as exc:
-            failures[key] = f"{type(exc).__name__}: {exc}"
-
-    if failures:
-        raise RuntimeError(f"Market-data acquisition failed for symbols: {failures}")
-
-    return histories
+    return download_yfinance_histories(
+        symbols=[str(symbol) for symbol in constituents["Symbol"]],
+        start=start,
+        end=end,
+        batch_size=100,
+    )
 
 
 def acquire_and_build_universe_snapshots(
