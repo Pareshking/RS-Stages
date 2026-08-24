@@ -136,3 +136,13 @@ def test_nse_csv_rejects_duplicate_symbol(tmp_path):
     pd.DataFrame({"Symbol": ["ABC", "ABC"], "Industry": ["A", "A"]}).to_csv(path, index=False)
     with pytest.raises(ValueError):
         load_nse_constituents_csv(path)
+
+
+def test_nse_csv_ignores_symbols_starting_with_dummy(tmp_path):
+    path = tmp_path / "nse.csv"
+    pd.DataFrame(
+        {"Symbol": ["ABC", "DUMMYFOO", "DUMMYBAR", "XYZ"], "Industry": ["A", "X", "Y", "B"]}
+    ).to_csv(path, index=False)
+    got = load_nse_constituents_csv(path)
+    assert list(got["Symbol"]) == ["ABC", "XYZ"]
+    assert list(got["Industry"]) == ["A", "B"]
