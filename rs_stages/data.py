@@ -52,10 +52,25 @@ def latest_completed_session(index: pd.DatetimeIndex, decision_date: pd.Timestam
 
 
 def build_decision_snapshot(market_data: pd.DataFrame, decision_date: pd.Timestamp) -> DecisionSnapshot:
-    """Freeze only information available before the upcoming session opens."""
+    """Freeze only information available before the upcoming session opens.
+
+    The boundary is the latest session that actually carries a Close, not merely
+    the latest row the provider emitted. Yahoo publishes a dated row before the
+    session's values are final, and a row with no Close is not a completed
+    session: adopting it as the information boundary fabricates a boundary and
+    §3 forbids that. Downstream the consequence was total — every calendar
+    window would start and end one session late, so the 30-week average, its
+    slope, Stage and every v2.2 field disagreed with an independent
+    recalculation that had dropped the empty row first.
+
+    Only the boundary is chosen this way. Interior rows are left untouched, so
+    no history is discarded: a window mean skips a NaN and a window that never
+    contained the row produce the same number.
+    """
     data = normalize_session_index(market_data)
     decision = pd.Timestamp(decision_date)
-    latest = latest_completed_session(data.index, decision)
+    usable = data.index[data["Close"].notna()] if "Close" in data.columns else data.index
+    latest = latest_completed_session(usable, decision)
     return DecisionSnapshot(
         decision_date=decision.normalize(),
         latest_completed_session=latest,
