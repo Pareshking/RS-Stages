@@ -72,7 +72,12 @@ def validate_market_columns(frame: pd.DataFrame) -> None:
 
 
 def load_nse_constituents_csv(path: str | Path) -> pd.DataFrame:
-    """Load the NSE universe without silently changing Symbol or Industry."""
+    """Load the NSE universe and ignore symbols reserved for corporate actions.
+
+    Symbols beginning with the literal prefix ``DUMMY`` are excluded from the
+    analytical universe. The downloaded CSV itself remains unchanged so it is
+    preserved as the official source file.
+    """
     frame = pd.read_csv(path)
     required = {"Symbol", "Industry"}
     missing = required.difference(frame.columns)
@@ -80,9 +85,12 @@ def load_nse_constituents_csv(path: str | Path) -> pd.DataFrame:
         raise ValueError(f"NSE CSV missing required columns: {sorted(missing)}")
     if frame["Symbol"].isna().any() or frame["Industry"].isna().any():
         raise ValueError("NSE CSV contains missing Symbol or Industry values")
+    frame["Symbol"] = frame["Symbol"].astype(str).str.strip()
+    if frame["Symbol"].eq("").any():
+        raise ValueError("NSE CSV contains empty Symbol values")
     if frame["Symbol"].duplicated().any():
         raise ValueError("NSE CSV contains duplicate symbols")
-    return frame.copy()
+    return frame.loc[~frame["Symbol"].str.startswith("DUMMY", na=False)].copy()
 
 
 def yfinance_symbol(symbol: str) -> str:
@@ -121,8 +129,6 @@ def download_yfinance_history(symbol: str, start: str | pd.Timestamp, end: str |
     if frame.empty:
         raise ValueError(f"No market data returned for {ticker}")
 
-    # yfinance may return a one-symbol MultiIndex. Collapse only the symbol
-    # level; do not alter the OHLCV values.
     if isinstance(frame.columns, pd.MultiIndex):
         if ticker in frame.columns.get_level_values(-1):
             frame = frame.xs(ticker, axis=1, level=-1)
