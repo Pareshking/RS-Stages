@@ -10,17 +10,21 @@ import pandas as pd
 
 
 def latest_completed_session(index: pd.DatetimeIndex, decision_date: pd.Timestamp) -> pd.Timestamp:
-    """Return the latest observed session on/before a pre-market decision date."""
+    """Return the latest observed session strictly before a pre-market decision date."""
     idx = pd.DatetimeIndex(index).sort_values().unique()
-    pos = idx.searchsorted(pd.Timestamp(decision_date), side="right") - 1
+    pos = idx.searchsorted(pd.Timestamp(decision_date), side="left") - 1
     if pos < 0:
         raise ValueError("No completed session is available before decision date")
     return idx[pos]
 
 
 def calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp:
-    """Return the last observed session on/before a calendar reference date."""
-    return latest_completed_session(index, pd.Timestamp(target))
+    """Return the last observed session on or before a calendar reference date."""
+    idx = pd.DatetimeIndex(index).sort_values().unique()
+    pos = idx.searchsorted(pd.Timestamp(target), side="right") - 1
+    if pos < 0:
+        raise ValueError("No session exists on or before calendar reference date")
+    return idx[pos]
 
 
 def rs_returns(close: pd.Series, latest: pd.Timestamp) -> dict[int, float]:
@@ -49,26 +53,26 @@ def rs_score(blend: pd.Series) -> pd.Series:
 
 
 def calendar_window(series: pd.Series, end: pd.Timestamp, weeks: int) -> pd.Series:
-    """Return observations in the inclusive preceding calendar-week window."""
-    end = pd.Timestamp(end)
-    start = end - pd.Timedelta(weeks=weeks)
+    """Return observations from the calendar start reference session through end."""
     s = series.sort_index()
-    return s.loc[(s.index >= start) & (s.index <= end)]
+    t = calendar_asof(s.index, pd.Timestamp(end))
+    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=weeks))
+    return s.loc[(s.index >= start_ref) & (s.index <= t)]
 
 
 def ma_30w(close: pd.Series, end: pd.Timestamp) -> float:
-    """30-calendar-week simple moving average; full calendar window required."""
+    """30-calendar-week simple moving average using calendar start as-of session."""
     s = close.sort_index().dropna()
     t = calendar_asof(s.index, pd.Timestamp(end))
-    start = t - pd.Timedelta(weeks=30)
-    window = s.loc[(s.index >= start) & (s.index <= t)]
-    if window.empty or window.index.min() > start:
-        raise ValueError("Insufficient history for complete 30W MA window")
+    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=30))
+    window = s.loc[(s.index >= start_ref) & (s.index <= t)]
+    if len(window) < 2:
+        raise ValueError("Insufficient history for 30W MA window")
     return float(window.mean())
 
 
 def ma_30w_series(close: pd.Series) -> pd.Series:
-    """Calendar-window 30W MA at each session where a complete window exists."""
+    """Calendar-window 30W MA at each session where a reference session exists."""
     s = close.sort_index()
     values = []
     for t in s.index:
@@ -104,12 +108,12 @@ def classify_stage(close: float, ma: float, slope_pct: float) -> str:
 
 
 def high_52w(close_high: pd.Series, end: pd.Timestamp, min_sessions: int = 200) -> float:
-    """Maximum adjusted High in a complete 52-calendar-week window."""
+    """Maximum adjusted High in a 52-calendar-week window."""
     s = close_high.sort_index().dropna()
     t = calendar_asof(s.index, pd.Timestamp(end))
-    start = t - pd.Timedelta(weeks=52)
-    window = s.loc[(s.index >= start) & (s.index <= t)]
-    if window.index.min() > start or len(window) < min_sessions:
+    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=52))
+    window = s.loc[(s.index >= start_ref) & (s.index <= t)]
+    if len(window) < min_sessions:
         raise ValueError("Insufficient history for 52W high")
     return float(window.max())
 
