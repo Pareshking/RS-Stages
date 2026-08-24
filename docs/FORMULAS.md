@@ -322,3 +322,67 @@ Source-code snippets using fixed trading-day row counts do not override the proj
 ## 14. Next Engineering Step
 
 Proceed with independent synthetic tests and real-data validation before declaring any production quantitative component complete.
+
+## v2.1 additions
+
+### 10-calendar-week moving average
+
+Let `S` be the sorted, non-null Close series and `T` the latest completed
+session. Let `t = asof(S, T)` and `s = asof(S, t - 10 weeks)`, where `asof`
+returns the last observed session **on or before** its argument.
+
+```
+MA_10W(T) = mean({ S(u) : s <= u <= t })
+```
+
+Identical in construction to `MA_30W` with the window length changed. Requires
+at least two observations in the window; otherwise explicit insufficiency.
+
+### 52-calendar-week low
+
+With `L` the adjusted Low series, `t = asof(L, T)` and `s = asof(L, t - 52 weeks)`:
+
+```
+Low_52W(T) = min({ L(u) : s <= u <= t })       requires >= 200 observations
+```
+
+Mirrors `High_52W` exactly.
+
+### Displayed presentation quantities
+
+```
+Ext_Pct            = (Close_T / MA_30W(T) - 1) * 100
+Pct_From_52W_High  = (Close_T / High_52W(T) - 1) * 100
+Range_Position     = (Close_T - Low_52W) / (High_52W - Low_52W)      in [0, 1]
+```
+
+`Ext_Pct` is for display. The locked condition remains
+`Extended_20Pct = Close_T > 1.20 * MA_30W(T)` and is **not** re-derived from
+`Ext_Pct`: the forms are algebraically equal but not bit-identical in floating
+point.
+
+### Trend health
+
+```
+Trend_Health = |{ Close > MA_30W,
+                  Slope_30W > 0,
+                  MA_10W > MA_30W,
+                  Close > MA_10W,
+                  RS_Score >= 50 }|                                 in [0, 5]
+```
+
+### Participation
+
+For a set of stocks `U`, let `C` be those with a classifiable Stage:
+
+```
+Above_30W(U)     = |{ i in C : Close_i > MA_30W_i }|
+Participation(U) = Above_30W(U) / |C| * 100
+```
+
+By the locked Stage classification, `{ i : Close_i > MA_30W_i } = { i : Stage_i
+in {2, 3} }`, so participation may be evaluated from either form.
+
+For the breadth history, participation at session `u` counts only symbols whose
+moving average is defined at `u`, and each symbol's average at `u` is evaluated
+using data through `u` only.

@@ -116,3 +116,43 @@ def test_industry_leadership_uses_median_rs_and_participation_share():
     assert got.loc["Banks", "Stage2"] == 0
     # A missing RS must not drag the median toward zero.
     assert np.isclose(got.loc["Banks", "Median_RS"], 33.5)
+
+
+def test_participation_is_read_from_stage_when_the_explicit_field_is_absent():
+    """Stage 2 and Stage 3 are, by the locked definition, exactly 'above the line'."""
+    frame = _frame().drop(columns=["Above_MA_30W"])
+    got = breadth_snapshot(frame)
+    assert got["above_ma_30w"] == 3  # two Stage 2 plus one Stage 3
+    assert np.isclose(got["pct_above_ma_30w"], 60.0)
+    assert got["above_ma_30w_source"] == "stage"
+    assert got["regime"] == "Broad"
+
+
+def test_participation_never_reports_zero_because_a_column_is_missing():
+    """A pre-v2.1 snapshot must not be rendered as a market with no participation."""
+    with_field = breadth_snapshot(_frame())
+    without_field = breadth_snapshot(_frame().drop(columns=["Above_MA_30W"]))
+    assert with_field["above_ma_30w"] == without_field["above_ma_30w"]
+    assert with_field["regime"] == without_field["regime"]
+
+
+def test_unclassifiable_stocks_leave_the_participation_denominator():
+    frame = _frame()
+    frame.loc[frame["Symbol"] == "E", "Stage"] = None
+    got = breadth_snapshot(frame)
+    assert got["symbols"] == 5
+    assert got["classified"] == 4
+    # Three of the four classifiable stocks are above their own 30-week line.
+    assert np.isclose(got["pct_above_ma_30w"], 75.0)
+
+
+def test_ten_week_participation_is_unavailable_not_zero_percent():
+    got = breadth_snapshot(_frame().drop(columns=["Above_MA_10W"]))
+    assert got["has_ma_10w"] is False
+    assert np.isnan(got["pct_above_ma_10w"])
+
+
+def test_industry_participation_uses_stage_when_the_field_is_absent():
+    got = industry_leadership(_frame().drop(columns=["Above_MA_30W"])).set_index("Industry")
+    assert np.isclose(got.loc["IT", "Participation_Pct"], 100.0)
+    assert np.isclose(got.loc["Banks", "Participation_Pct"], 100.0 / 3.0)

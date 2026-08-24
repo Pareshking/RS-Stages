@@ -26,7 +26,27 @@ Correctness takes precedence over speed, presentation, and backtest performance.
 
 The pure calculation layer is in `rs_stages/quant.py` and tests are in `tests/test_quant.py`.
 
-Locked methodology includes calendar-date RS lookbacks, a 30-calendar-week MA, a 10-session MA slope, a 52-calendar-week high with at least 200 valid sessions, a prior-50-session shifted volume baseline, and a 20-session Up/Down volume ratio.
+Locked methodology includes calendar-date RS lookbacks, a 30-calendar-week MA, a 10-calendar-week MA, a 10-session MA slope, a 52-calendar-week high and low each requiring at least 200 valid sessions, a prior-50-session shifted volume baseline, and a 20-session Up/Down volume ratio.
+
+## Architecture
+
+| Layer | Module | Responsibility |
+| --- | --- | --- |
+| Calculation | `rs_stages/quant.py` | Pure locked primitives. No IO. |
+| Acquisition | `rs_stages/data.py`, `rs_stages/pipeline.py` | Provider access and the pre-market information boundary. |
+| Universe | `rs_stages/screener.py` | Per-symbol locked fields and the trend series. |
+| Interpretation | `rs_stages/actions.py` | The nine-label guide Action mapping. |
+| Aggregation | `rs_stages/market.py`, `rs_stages/movers.py` | Breadth counts and day-over-day set differences. |
+| Presentation | `rs_stages/ui/`, `app_v7.py` | Design tokens, HTML components and the seven views. Reads published artifacts only. |
+| Audit | `scripts/real_data_audit.py` | Independent reconciliation, then publishes the artifacts. |
+
+## Published Artifacts
+
+The Real Data Research Audit workflow publishes `data/latest_research.csv`,
+`data/previous_research.csv`, `data/price_panel.parquet` and
+`data/breadth_history.csv`. The UI reads these and nothing else; when one is
+absent the affected section says so explicitly rather than showing a
+substitute value.
 
 All signals respect the pre-market information boundary: the latest completed NSE session is the terminal information date for the upcoming decision session.
 

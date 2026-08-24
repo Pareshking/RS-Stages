@@ -32,3 +32,78 @@
 10. The Action column is the final decision column in the screener and stock pages expose the underlying evidence and exact Action reason.
 
 Locked decisions may only be changed through a new documented decision/audit item supported by evidence.
+
+## 2026-08-24 — v2.1 decisions
+
+### D-2.1.1 — Snapshot was stale relative to the pipeline
+
+**Problem.** `data/latest_research.csv` predated the commit that added the guide
+timing fields to `analyze_universe`. `rs_stages/actions.py` reads
+`Extended_20Pct` and `Below_50DMA` with `row.get(field, False)`, so both
+evaluated `False` for all 750 stocks and the two WAIT rules in the Stage 2 /
+RS ≥ 80 branch could never fire.
+
+**Classification.** Data-quality problem with a decision-layer consequence.
+
+**Measured impact after republishing the snapshot:** of the 137 stocks in that
+branch, **111** correctly become WAIT, and **7 of the 8 previous `BUY★` labels
+were wrong** — they were extended beyond 20% above the 30-week line or below
+their 50-session average. One genuine `BUY★` remained.
+
+**Resolution.** Republished via the Real Data Research Audit workflow. The
+snapshot now carries `SMA_50`, `Below_50DMA`, `Extended_20Pct`, `Distribution`
+and `Heavy_Distribution`.
+
+**Prevention.** `tests/test_research_artifacts.py` asserts the timing fields are
+present in the published snapshot and that Action is reproducible from the
+published columns.
+
+### D-2.1.2 — 10-week line: calendar weeks, not 50 sessions
+
+Adopting the reference terminal's shorter trend line required a definition the
+locked spec did not have. Two candidates: a 10-calendar-week SMA, or reuse of
+the 50-session `SMA_50` already computed for the below-50DMA condition.
+
+**Chosen:** the 10-calendar-week SMA, because it uses the identical construction
+to the locked 30-week line and the two are therefore directly comparable. Mixing
+a trading-day average with a calendar-week average on one chart would make the
+pair meaningless. `SMA_50` is unchanged and still serves its own condition.
+
+`MA_10W` does not reclassify Stage and no locked signal depends on it.
+
+### D-2.1.3 — Calendar MA generalised, proven bit-identical
+
+`ma_30w`/`ma_30w_series` now delegate to a shared calendar-window
+implementation, and the series builder resolves window boundaries by position
+instead of re-sorting per session. `tests/test_ma_calendar_independent.py`
+asserts the fast builder is **bit-identical** (`np.array_equal`) to a
+per-session loop over the definition, including on gapped history. Performance
+was not permitted to change a numerical result.
+
+### D-2.1.4 — Price panel stores Close only
+
+The panel could have stored the moving averages alongside Close. It does not:
+the UI recomputes them for the single symbol it draws, using the locked
+functions. A stored average could silently diverge from the definition after a
+later spec change; a recomputed one cannot. It also bounds repository growth,
+which is the known cost of committing price history on every run.
+
+### D-2.1.5 — Participation derived from Stage when the field is absent
+
+`breadth_snapshot` originally counted a missing `Above_MA_30W` column as zero,
+which rendered a live market as "Narrow, 0% above the 30-week line" — a
+fabricated reading of exactly the kind section 3 forbids.
+
+`Above_MA_30W` is now read from Stage when the explicit field is absent. This is
+not an inference: the locked classification defines Stage 2 and Stage 3 as
+exactly `Close > MA_30W`, and Stage 1 and Stage 4 as exactly `Close <= MA_30W`.
+Stocks whose Stage could not be classified are excluded from the numerator *and*
+the denominator. `Above_MA_10W` has no such identity and is reported as
+unavailable rather than derived.
+
+### D-2.1.6 — No Positioning tab
+
+The reference terminal's fifth view is entirely F&O (open interest, basis,
+implied volatility, put/call, max pain). The repository has no derivatives data
+and locked-spec section 2 forbids F&O filtering. The view is omitted. No
+substitute was invented to fill the slot.

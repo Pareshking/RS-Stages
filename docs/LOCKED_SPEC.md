@@ -1,6 +1,6 @@
 # RS-Stages — Locked Quantitative & Decision Specification
 
-**Status:** LOCKED — v2.0  
+**Status:** LOCKED — v2.1  
 **Date:** 2026-08-24  
 **Repository:** `Pareshking/RS-Stages`  
 **Primary technology:** Streamlit
@@ -137,6 +137,60 @@ Confirmed breakout:
 
 The two states must never be collapsed.
 
+## 9.1 Published snapshot fields — NEW v2.1
+
+The audit publishes, in addition to the fields above:
+
+- `Close` — the adjusted close of the latest completed session T. Every
+  price-derived presentation value traces to this single observation.
+- `Ext_Pct` = `(Close / MA_30W - 1) × 100`. This is the **displayed** extension.
+  The locked `Extended_20Pct` condition keeps its specified form
+  `Close > 1.20 × MA_30W` and is **not** re-derived from `Ext_Pct`: the two are
+  algebraically equal but not bit-identical in floating point, and the
+  comparison in section 10.1 remains the authority.
+- `Pct_From_52W_High` = `(Close / High_52W - 1) × 100`.
+- `Above_MA_30W`, `Above_MA_10W`, `MA10W_Above_MA30W`, `MA_30W_Rising` — strict
+  comparisons between locked fields.
+- `Trend_Health` — an integer 0–5, the count of the five conditions in
+  section 9.3. It is a display aggregate; no locked signal consumes it.
+
+## 9.2 The 10-calendar-week MA — NEW v2.1
+
+`MA_10W` is a simple average over **every valid NSE session in a 10-calendar-week
+window** ending at T, constructed exactly as the 30-week MA in section 5. It is
+not a fixed 50-row trading-day average.
+
+The alternative interpretation — reusing the 50-session `SMA_50` already
+computed for the guide's below-50DMA condition — was considered and rejected:
+placing a trading-day average beside a calendar-week average would make the two
+trend lines non-comparable. `SMA_50` remains, unchanged, for its own condition
+in section 10.2.
+
+`MA_10W` is a trend reference and a checklist input only:
+
+- it does **not** reclassify Stage;
+- no locked signal, breakout condition or Action rule depends on it;
+- the Stage definition in section 5 is unchanged.
+
+## 9.3 Trend health — NEW v2.1
+
+`Trend_Health` counts these five conditions, all locked fields or strict
+comparisons between them:
+
+1. `Close > MA_30W`
+2. `MA_30W_Slope_10S_Pct > 0`
+3. `MA_10W > MA_30W`
+4. `Close > MA_10W`
+5. `RS_Score >= 50` (the locked "not lagging" band from section 4)
+
+## 9.4 52-week low — NEW v2.1
+
+`Low_52W` is the minimum adjusted Low over the preceding 52 calendar weeks
+ending at T, requiring at least 200 valid sessions — the same window and the
+same guard as `High_52W` in section 6. It is a presentation/range input; no
+locked signal consumes it. When the provider frame carries no `Low` column the
+field is explicit insufficiency (NaN) and is never substituted with `Close`.
+
 ## 10. New guide-derived timing fields
 
 ### 10.1 Extension
@@ -157,7 +211,7 @@ The guide's **below 50DMA** condition is operationalized as the 50 completed-ses
 
 This is a timing warning, not a Stage reclassification.
 
-### 10.3 Pullback / volume drying
+## 10.3 Pullback / volume drying
 
 The guide references pullback + volume drying as a buy-timing condition but does not supply a sufficiently precise quantitative definition in the repository adaptation. RS-Stages therefore does **not** fabricate a detector for this condition. It remains an explicit future specification item.
 
@@ -222,6 +276,35 @@ Every Action shown to a user must expose:
 
 The Action is never permitted to hide the underlying mathematics.
 
+## 12.1 Published artifacts — NEW v2.1
+
+The audit downloads market data once and runs the identical pipeline at two
+decision dates, publishing:
+
+| Artifact | Contents |
+| --- | --- |
+| `data/latest_research.csv` | The snapshot at decision date D (latest completed session T). |
+| `data/previous_research.csv` | The same pipeline with the boundary moved back one completed session (latest completed T-1). |
+| `data/price_panel.parquet` | `Date, Symbol, Close` (float32) for the trailing 420 sessions per symbol. |
+| `data/breadth_history.csv` | Point-in-time participation counts for the trailing 120 sessions. |
+
+Constraints:
+
+- Both snapshots must come from the same pipeline version. Diffing against a
+  snapshot produced before a field existed would report the field's *arrival* as
+  a market change, so any field missing from either side is skipped entirely.
+- The price panel stores `Close` only. The moving averages are deliberately
+  **not** stored: the presentation layer recomputes them for the single symbol
+  it draws, using the same locked functions, so a drawn line cannot drift from
+  the definition it claims to show.
+- The breadth history is a stack of point-in-time counts. Each session's count
+  uses only moving averages evaluated at that session, so the series carries no
+  look-ahead. Symbols without a valid average at a session are excluded from
+  both that session's numerator and its denominator.
+- The panel is committed on every audit run. Repository growth is a known cost
+  of publishing reproducible price history; the panel is float32 and Close-only
+  specifically to bound it.
+
 ## 13. Liquidity
 
 Liquidity remains a UI/screener filter only:
@@ -268,3 +351,21 @@ The following early design decisions are retired:
 - UI whose Action explanation is less detailed than the underlying evidence.
 
 The quantitative RS/Stage definitions remain unchanged unless explicitly modified above.
+
+## 16. v2.1 change summary
+
+Additive only. No v2.0 definition was altered:
+
+- Added `MA_10W`, `Low_52W`, `Close`, `Ext_Pct`, `Pct_From_52W_High`,
+  `Trend_Health` and the trend-health booleans to the published snapshot.
+- Generalised the calendar-window moving average into a single shared
+  definition. `ma_30w` and `ma_30w_series` now delegate to it and are proven
+  bit-identical to the previous implementation, including on gapped history.
+- Added the previous-session snapshot, the price panel and the breadth history
+  as published artifacts.
+- Extended the independent reconciliation in the audit to the 10-week MA, the
+  52-week low and the price panel.
+
+RS, Stage, the 52-week high, volume ratio, U/D, breakout, confirmation, the
+timing warnings, liquidity and the nine-label Action framework are byte-for-byte
+unchanged.

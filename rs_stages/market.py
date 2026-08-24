@@ -27,6 +27,32 @@ def _count(frame: pd.DataFrame, column: str) -> int:
     return int(frame[column].fillna(False).astype(bool).sum())
 
 
+def _stage_labels(frame: pd.DataFrame) -> pd.Series:
+    if "Stage" not in frame.columns:
+        return pd.Series("", index=frame.index, dtype=str)
+    return frame["Stage"].astype(str).str.split(" — ", n=1).str[0]
+
+
+def above_ma_30w(frame: pd.DataFrame) -> pd.Series:
+    """Boolean series for 'close is above the 30-week line'.
+
+    When the snapshot carries the explicit field it is used directly. Otherwise
+    the value is read from Stage, which is not an inference: the locked
+    classification defines Stage 2 and Stage 3 as exactly ``Close > MA_30W`` and
+    Stage 1 and Stage 4 as exactly ``Close <= MA_30W``. A stock whose Stage could
+    not be classified is neither above nor below, and is excluded from the
+    denominator by :func:`classified_count`.
+    """
+    if "Above_MA_30W" in frame.columns:
+        return frame["Above_MA_30W"].fillna(False).astype(bool)
+    return _stage_labels(frame).isin(["Stage 2", "Stage 3"])
+
+
+def classified_count(frame: pd.DataFrame) -> int:
+    """Stocks with a usable Stage — the honest denominator for participation."""
+    return int(_stage_labels(frame).isin(["Stage 1", "Stage 2", "Stage 3", "Stage 4"]).sum())
+
+
 def _share(count: int, total: int) -> float:
     return float(count) / float(total) * 100.0 if total else float("nan")
 
@@ -49,24 +75,25 @@ def breadth_snapshot(frame: pd.DataFrame) -> dict:
     is reported as unavailable rather than as zero.
     """
     total = int(len(frame))
-    above_30w = _count(frame, "Above_MA_30W")
+    stage = _stage_labels(frame)
+    classified = classified_count(frame)
+    above_30w = int(above_ma_30w(frame).sum())
     above_10w = _count(frame, "Above_MA_10W")
+    has_10w = "Above_MA_10W" in frame.columns
 
-    stage = (
-        frame["Stage"].astype(str).str.split(" — ", n=1).str[0]
-        if "Stage" in frame.columns
-        else pd.Series(dtype=str)
-    )
-
-    pct_30w = _share(above_30w, total)
+    # Participation is measured against the stocks that could actually be
+    # classified, so insufficient history dilutes neither numerator nor
+    # denominator.
+    pct_30w = _share(above_30w, classified)
     label, description = regime_label(pct_30w)
 
     out = {
         "symbols": total,
+        "classified": classified,
         "above_ma_30w": above_30w,
         "above_ma_10w": above_10w,
         "pct_above_ma_30w": pct_30w,
-        "pct_above_ma_10w": _share(above_10w, total),
+        "pct_above_ma_10w": _share(above_10w, classified) if has_10w else float("nan"),
         "near_52w_high": _count(frame, "Near_52W_High"),
         "breakout": _count(frame, "Breakout"),
         "breakout_confirmed": _count(frame, "Breakout_Confirmed"),
@@ -76,7 +103,8 @@ def breadth_snapshot(frame: pd.DataFrame) -> dict:
         "stages": {
             f"Stage {n}": int((stage == f"Stage {n}").sum()) for n in (1, 2, 3, 4)
         },
-        "has_ma_10w": "Above_MA_10W" in frame.columns,
+        "has_ma_10w": has_10w,
+        "above_ma_30w_source": "field" if "Above_MA_30W" in frame.columns else "stage",
     }
     if "RS_Score" in frame.columns:
         rs = pd.to_numeric(frame["RS_Score"], errors="coerce")
@@ -173,15 +201,20 @@ def industry_leadership(frame: pd.DataFrame, industry_column: str = "Industry") 
     if stage is not None:
         work["_stage"] = stage
         out["Stage2"] = work.groupby(industry_column)["_stage"].apply(lambda s: int((s == "Stage 2").sum()))
-    for source, name in (
-        ("Above_MA_30W", "Participation"),
-        ("Breakout_Confirmed", "Confirmed"),
-        ("Near_52W_High", "Near_High"),
-    ):
+    participation = above_ma_30w(work)
+    out["Participation"] = participation.groupby(work[industry_column]).sum().astype(int)
+    for source, name in (("Breakout_Confirmed", "Confirmed"), ("Near_52W_High", "Near_High")):
         if source in work.columns:
             flags = work[source].fillna(False).astype(bool)
             out[name] = flags.groupby(work[industry_column]).sum().astype(int)
-    if "Participation" in out.columns:
-        out["Participation_Pct"] = out["Participation"] / out["Stocks"] * 100.0
+    classified_by_industry = (
+        _stage_labels(work)
+        .isin(["Stage 1", "Stage 2", "Stage 3", "Stage 4"])
+        .groupby(work[industry_column])
+        .sum()
+    )
+    out["Participation_Pct"] = np.where(
+        classified_by_industry > 0, out["Participation"] / classified_by_industry * 100.0, np.nan
+    )
     out = out.reset_index().rename(columns={industry_column: "Industry"})
     return out.sort_values(["Median_RS", "Stocks"], ascending=[False, False]).reset_index(drop=True)
