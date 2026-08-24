@@ -17,7 +17,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -39,16 +39,29 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          mkdir -p data
           python scripts/real_data_audit.py \
             --universe data/ind_niftytotalmarket_list.csv \
             --decision-date '${{ inputs.decision_date }}' \
             --start '${{ inputs.start_date }}' \
             --end '${{ inputs.end_date }}' \
-            --output real_data_audit.csv
+            --output data/latest_research.csv
+
+      - name: Publish validated research snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/latest_research.csv
+          if git diff --cached --quiet; then
+            echo "Validated research snapshot unchanged."
+          else
+            git commit -m "data: publish validated research snapshot"
+            git push
+          fi
 
       - name: Upload research output
         uses: actions/upload-artifact@v4
         with:
           name: real-data-audit-${{ inputs.decision_date || 'auto' }}
-          path: real_data_audit.csv
+          path: data/latest_research.csv
           retention-days: 30
