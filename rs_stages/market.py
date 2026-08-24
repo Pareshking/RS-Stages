@@ -115,7 +115,7 @@ def breadth_snapshot(frame: pd.DataFrame) -> dict:
 
 
 def breadth_history_from_trends(
-    trends: dict[str, pd.DataFrame], sessions: int = 120
+    trends: dict[str, pd.DataFrame], sessions: int = 120, min_coverage: float = 0.5
 ) -> pd.DataFrame:
     """Build a participation time series from per-symbol trend frames.
 
@@ -164,7 +164,12 @@ def breadth_history_from_trends(
             "Above_MA_10W": _sum(above_10w),
         }
     ).sort_index()
-    history = history[history["Symbols"] > 0]
+    # A 30-week average needs about 150 sessions of warm-up, so the oldest part
+    # of a long window is measurable for only a handful of symbols. A percentage
+    # taken over five stocks is not breadth, so sessions covering less than
+    # min_coverage of the panel are dropped rather than plotted as a spike.
+    universe = len(trends)
+    history = history[history["Symbols"] >= max(1, int(universe * min_coverage))]
     history["Pct_Above_MA_30W"] = history["Above_MA_30W"] / history["Symbols"] * 100.0
     history["Pct_Above_MA_10W"] = np.where(
         history["Symbols_MA_10W"] > 0,

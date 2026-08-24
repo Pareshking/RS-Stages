@@ -12,14 +12,25 @@ from rs_stages.market import breadth_history_from_trends
 from rs_stages.pipeline import acquire_universe_histories
 from rs_stages.screener import analyze_universe, analyze_universe_with_trend
 from rs_stages.quant import rs_blend, rs_returns, calendar_asof
-from rs_stages.data import build_decision_snapshot, load_nse_constituents_csv
+from rs_stages.data import (
+    INDEX_TICKERS,
+    build_decision_snapshot,
+    download_index_history,
+    load_nse_constituents_csv,
+)
 
 #: Sessions of Close retained per symbol so the UI can draw price history and
 #: recompute the locked moving averages for a single symbol without a download.
 PANEL_SESSIONS = 420
 
 #: Sessions of universe-wide participation retained for the breadth trend.
-BREADTH_SESSIONS = 120
+BREADTH_SESSIONS = 250
+
+#: Benchmark plotted beside market breadth. It is reference data only: no RS
+#: ranking, Stage classification or Action rule reads it. Note that it tracks
+#: 500 companies while our breadth tracks the Nifty Total Market universe, so a
+#: divergence between the two lines can be composition, not market behaviour.
+BENCHMARK_KEY = "NIFTY_500"
 
 
 def independent_calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp:
@@ -346,7 +357,28 @@ def main() -> None:
     # Breadth history: point-in-time participation counts, one row per session.
     breadth_path = output_dir / "breadth_history.csv"
     breadth = breadth_history_from_trends(trends, sessions=BREADTH_SESSIONS)
+
+    # Benchmark index, aligned onto the breadth session calendar. A failure to
+    # fetch it must not fail the audit: breadth is ours and computed, the index
+    # is an external convenience, so the column is simply absent and the chart
+    # says so.
     if not breadth.empty:
+        ticker = INDEX_TICKERS[BENCHMARK_KEY]
+        try:
+            index_history = download_index_history(
+                ticker,
+                start=pd.Timestamp(breadth["Date"].min()),
+                end=pd.Timestamp(breadth["Date"].max()) + pd.Timedelta(days=1),
+            )
+            closes = index_history["Close"].astype(float)
+            aligned = closes.reindex(pd.DatetimeIndex(breadth["Date"]))
+            breadth["Benchmark_Close"] = aligned.to_numpy()
+            breadth["Benchmark_Ticker"] = ticker
+            covered = int(breadth["Benchmark_Close"].notna().sum())
+            print(f"Benchmark {ticker}: {covered} of {len(breadth)} sessions aligned")
+        except (ImportError, ValueError, KeyError, OSError) as exc:
+            print(f"Benchmark {ticker} unavailable ({type(exc).__name__}); breadth published without it")
+
         breadth.to_csv(breadth_path, index=False)
 
     if failures:

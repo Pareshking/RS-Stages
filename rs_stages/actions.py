@@ -64,6 +64,43 @@ def action_for(row: Any) -> str:
     return "HOLD"
 
 
+def _wait_gap(row: Any, stage: str, rs: float) -> str:
+    """Name the condition a WAIT is actually waiting for.
+
+    docs/ACTION_SPEC.md section 5 requires the exact reason for an Action.
+    "Wait for the missing guide condition" names nothing, which leaves the
+    reader unable to tell an extended leader from a lagging one. Each branch
+    below states the specific rule that is unmet.
+    """
+    if stage == "Stage 2":
+        if bool(row.get("Extended_20Pct")):
+            ext = _num(row.get("Ext_Pct"))
+            at = f" (currently {ext:+.0f}%)" if math.isfinite(ext) else ""
+            return (
+                "wait because price is more than 20% above the 30-week line"
+                f"{at} — the guide treats that as poor entry timing, not a failed trend."
+            )
+        if bool(row.get("Below_50DMA")):
+            return (
+                "wait because the close is below its 50-session average — short-term timing "
+                "has weakened even though the 30-week trend is intact."
+            )
+        if math.isfinite(rs) and rs < 50.0:
+            return (
+                "wait because relative strength is below 50 — the trend has turned up but the "
+                "stock still lags most of the universe."
+            )
+        if math.isfinite(rs) and rs < 80.0:
+            if bool(row.get("Breakout")):
+                return (
+                    f"wait because a breakout without leadership is not an entry: RS needs 80, "
+                    f"short by {80.0 - rs:.0f}."
+                )
+            return f"wait because RS is below the 80 leadership band, short by {80.0 - rs:.0f}."
+        return "wait for a clearer entry trigger; no breakout setup is present."
+    return f"wait because the guide requires Stage 2 before buying, and this is {stage}."
+
+
 def action_reason(row: Any, action: str) -> str:
     """Explain the exact decision precedence that produced an Action."""
     stage = _stage(row.get("Stage"))
@@ -87,7 +124,7 @@ def action_reason(row: Any, action: str) -> str:
     if action == "AVOID":
         return f"{stage} + {rs_text}; weak RS in a basing stage is AVOID."
     if action == "WAIT":
-        return f"{stage} + {rs_text}; wait for the missing guide condition or improved timing."
+        return f"{stage} + {rs_text}; {_wait_gap(row, stage, rs)}"
     if action == "BUY★":
         return f"{stage} + {rs_text}; breakout is confirmed and no guide timing warning is active."
     if action == "BUY":

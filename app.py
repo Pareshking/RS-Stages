@@ -617,46 +617,88 @@ def page_market() -> None:
         missing("breadth")
     else:
         history = SNAP.breadth
-        payload = [
-            {"time": pd.Timestamp(r["Date"]).strftime("%Y-%m-%d"), "value": float(r["Pct_Above_MA_30W"])}
-            for _, r in history.iterrows()
-            if pd.notna(r.get("Pct_Above_MA_30W"))
-        ]
-        payload10 = [
-            {"time": pd.Timestamp(r["Date"]).strftime("%Y-%m-%d"), "value": float(r["Pct_Above_MA_10W"])}
-            for _, r in history.iterrows()
-            if pd.notna(r.get("Pct_Above_MA_10W"))
-        ]
+
+        def series(column):
+            return [
+                {"time": pd.Timestamp(r["Date"]).strftime("%Y-%m-%d"), "value": float(r[column])}
+                for _, r in history.iterrows()
+                if column in history.columns and pd.notna(r.get(column))
+            ]
+
+        benchmark = series("Benchmark_Close")
+        ticker = (
+            str(history["Benchmark_Ticker"].dropna().iloc[-1])
+            if "Benchmark_Ticker" in history.columns and history["Benchmark_Ticker"].notna().any()
+            else ""
+        )
+        legend = (
+            '<span class="item"><span style="width:14px;height:2.5px;background:#2D6CDF"></span>'
+            "Above 30-week</span>"
+            '<span class="item"><span style="width:14px;height:2.5px;background:#9DBDF0"></span>'
+            "Above 10-week</span>"
+        )
+        if benchmark:
+            legend += (
+                '<span class="item"><span style="width:14px;height:0;border-top:2px dashed '
+                f'#1a1d21"></span>Nifty 500{" · " + ui.esc(ticker) if ticker else ""}</span>'
+            )
+        detail = (
+            f"{len(history)} completed sessions, each counted as of that session. The series is a "
+            "stack of point-in-time counts, not one snapshot projected backwards."
+        )
+        if benchmark:
+            detail += (
+                " Breadth is a percentage on the left axis; the index is a price level on the "
+                "right. The index tracks 500 companies while breadth tracks the whole Nifty Total "
+                "Market universe, so a divergence can be composition rather than market behaviour."
+            )
         write(
             ui.card(
                 '<div style="display:flex;align-items:center;justify-content:space-between;'
                 'flex-wrap:wrap;gap:8px;margin-bottom:6px">'
                 '<span style="font-size:13px;font-weight:700">Participation trend</span>'
-                '<span class="ws-legend"><span class="item">'
-                '<span style="width:14px;height:2.5px;background:#2D6CDF"></span>Above 30-week</span>'
-                '<span class="item"><span style="width:14px;height:2.5px;background:#9DBDF0"></span>'
-                "Above 10-week</span></span></div>"
-                f'<div class="ws-note">{len(history)} completed sessions, each counted as of that '
-                "session. The series is a stack of point-in-time counts, not one snapshot projected "
-                "backwards.</div>"
+                f'<span class="ws-legend">{legend}</span></div>'
+                f'<div class="ws-note">{detail}</div>'
             )
         )
-        _line_chart(payload, payload10)
+        _line_chart(series("Pct_Above_MA_30W"), series("Pct_Above_MA_10W"), benchmark)
+        if not benchmark:
+            st.write("")
+            write(
+                ui.missing_notice(
+                    "No benchmark index in this snapshot",
+                    "The breadth history carries no index column, so only participation is drawn. "
+                    "Re-run the Real Data Research Audit to publish it alongside breadth.",
+                )
+            )
 
 
-def _line_chart(series_30w: list[dict], series_10w: list[dict]) -> None:
-    """Participation trend: share above the 30-week and 10-week lines."""
+def _line_chart(
+    series_30w: list[dict], series_10w: list[dict], benchmark: list[dict] | None = None
+) -> None:
+    """Participation trend, with the benchmark index on its own axis.
+
+    Breadth is a percentage and an index is a price level; sharing one scale
+    would flatten whichever has the smaller range into a straight line, so the
+    index gets the right-hand axis and breadth keeps the left.
+    """
+    series = [
+        {"data": series_30w, "color": "#2D6CDF", "last_value": True, "scale": "left"},
+        {"data": series_10w, "color": "#9DBDF0", "scale": "left"},
+    ]
+    if benchmark:
+        series.append(
+            {"data": benchmark, "color": "#1a1d21", "dashed": True, "last_value": True,
+             "scale": "right"}
+        )
     components.html(
         charts.line_chart(
-            [
-                {"data": series_30w, "color": "#2D6CDF", "last_value": True},
-                {"data": series_10w, "color": "#9DBDF0"},
-            ],
+            series,
             element_id="breadth",
-            height=230,
+            height=280,
             unavailable="The participation trend could not be drawn in this environment.",
         ),
-        height=246,
+        height=296,
         scrolling=False,
     )
 

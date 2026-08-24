@@ -58,6 +58,11 @@ def _series_js(series: Sequence[dict]) -> str:
         }
         if spec.get("dashed"):
             options["lineStyle"] = 2
+        # A series measured in different units needs its own axis: a breadth
+        # percentage and an index level cannot share a scale without one of
+        # them being flattened into meaninglessness.
+        if spec.get("scale"):
+            options["priceScaleId"] = spec["scale"]
         calls.append(
             f"chart.addSeries(LightweightCharts.LineSeries,{json.dumps(options)})"
             f".setData(d[{index}]);"
@@ -79,6 +84,7 @@ def line_chart(
     drawable = [spec for spec in series if spec.get("data")]
     payload = json.dumps([spec["data"] for spec in drawable])
     notice = json.dumps(unavailable)
+    left_visible = "true" if any(s.get("scale") == "left" for s in drawable) else "false"
     return f"""
 <div id="{element_id}" style="height:{height}px;background:#fff;border:1px solid #eef0f3;border-radius:14px"></div>
 {_loader()}
@@ -97,6 +103,7 @@ def line_chart(
     layout: {json.dumps(LAYOUT)},
     grid: {json.dumps(GRID)},
     rightPriceScale: {{borderColor: {json.dumps(SCALE_BORDER)}}},
+    leftPriceScale: {{visible: {left_visible}, borderColor: {json.dumps(SCALE_BORDER)}}},
     timeScale: {{borderColor: {json.dumps(SCALE_BORDER)}, rightOffset: 3}},
     crosshair: {{mode: LightweightCharts.CrosshairMode.Normal}}
   }});

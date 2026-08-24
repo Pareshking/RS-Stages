@@ -319,6 +319,34 @@ Constraints:
   snapshot cache. Only the two views that draw price history load it, so a
   failure to read it degrades those two rather than the whole terminal.
 
+## 12.2 Benchmark index — NEW v2.1
+
+A benchmark index is published alongside the breadth history purely as a
+reference line on the Market page.
+
+- Ticker: `^CRSLDX` (Nifty 500), fetched with the same locked adjustment policy.
+- It is **not** part of the analytical universe. No RS ranking, Stage
+  classification, breakout condition or Action rule reads it.
+- Index tickers bypass `yfinance_symbol`, which maps NSE constituent symbols and
+  must stay locked to that job.
+- The index tracks 500 companies while breadth tracks the whole Nifty Total
+  Market universe. A divergence between the two lines can therefore be
+  composition rather than market behaviour, and the chart says so.
+- Breadth is a percentage and the index is a price level, so they are drawn on
+  separate axes. Sharing one scale would flatten whichever has the smaller
+  range.
+- A failure to fetch the index never fails the audit: breadth is ours and
+  computed, the index is an external convenience. The column is simply absent
+  and the page reports it.
+
+## 12.3 Breadth window and coverage — NEW v2.1
+
+The breadth history retains 250 completed sessions. A 30-week average needs
+roughly 150 sessions of warm-up, so the oldest part of a long window is
+measurable for only a few symbols. Sessions where fewer than 50% of the panel
+has a valid moving average are excluded: a percentage taken over a handful of
+stocks is not breadth, and plotting it would show a spike that means nothing.
+
 ## 13. Liquidity
 
 Liquidity remains a UI/screener filter only:

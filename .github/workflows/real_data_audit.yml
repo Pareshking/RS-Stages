@@ -1,6 +1,13 @@
 name: Real Data Research Audit
 
 on:
+  # 18:00 UTC is 23:30 IST — after the NSE close settles at the provider, and
+  # before the next trading session opens. The snapshot is therefore the latest
+  # completed session, which is exactly the pre-market information boundary the
+  # locked spec requires. Weekdays only: NSE does not trade at the weekend.
+  # Matches the universe refresh, which already runs at 18:00 UTC on Fridays.
+  schedule:
+    - cron: "0 18 * * 1-5"
   workflow_dispatch:
     inputs:
       decision_date:

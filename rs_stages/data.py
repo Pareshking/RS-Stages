@@ -101,6 +101,48 @@ def yfinance_symbol(symbol: str) -> str:
     return symbol if symbol.upper().endswith(".NS") else f"{symbol}.NS"
 
 
+#: Benchmark indices. These are NOT part of the analytical universe and never
+#: enter an RS ranking, a Stage classification or any locked signal. They exist
+#: only as a reference line beside market breadth.
+#:
+#: Index tickers are passed to the provider verbatim: they carry no ``.NS``
+#: suffix, so they must not go through :func:`yfinance_symbol`, which maps NSE
+#: constituent symbols and is locked to that job.
+INDEX_TICKERS = {
+    "NIFTY_500": "^CRSLDX",
+    "NIFTY_50": "^NSEI",
+}
+
+
+def download_index_history(
+    ticker: str, start: str | pd.Timestamp, end: str | pd.Timestamp
+) -> pd.DataFrame:
+    """Download a benchmark index using the same locked adjustment policy.
+
+    Separate from :func:`download_yfinance_history` because an index ticker is
+    not an NSE constituent symbol and must not be mapped as one. The result is
+    reference data for display; no locked calculation consumes it.
+    """
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise ImportError("yfinance is required for market-data acquisition") from exc
+
+    frame = yf.download(
+        str(ticker),
+        start=pd.Timestamp(start),
+        end=pd.Timestamp(end),
+        progress=False,
+        actions=False,
+        **yfinance_history_kwargs(),
+    )
+    if frame is None or frame.empty:
+        raise ValueError(f"No history returned for index {ticker}")
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = frame.columns.get_level_values(0)
+    return normalize_session_index(frame)
+
+
 def yfinance_history_kwargs() -> dict[str, bool]:
     """Return the locked yfinance adjustment policy."""
     return {"auto_adjust": True}
