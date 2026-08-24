@@ -8,6 +8,7 @@ from rs_stages.data import (
     normalize_session_index,
     validate_market_columns,
     yfinance_history_kwargs,
+    yfinance_symbol,
 )
 
 
@@ -57,6 +58,11 @@ def test_validate_market_columns():
 
 def test_yfinance_adjustment_policy_is_locked():
     assert yfinance_history_kwargs() == {"auto_adjust": True}
+
+
+def test_yfinance_symbol_maps_nse_csv_symbol_only_for_provider():
+    assert yfinance_symbol("RELIANCE") == "RELIANCE.NS"
+    assert yfinance_symbol("RELIANCE.NS") == "RELIANCE.NS"
 
 
 def test_nse_csv_ingestion_preserves_symbols_and_industry(tmp_path):
