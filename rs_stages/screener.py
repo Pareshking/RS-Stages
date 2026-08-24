@@ -1,6 +1,7 @@
 """Universe-level RS/Stage calculations on validated pre-market snapshots."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from .data import DecisionSnapshot
@@ -27,7 +28,6 @@ def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
     with explicit NaNs/False signals rather than fabricated values.
     """
     rows: list[dict] = []
-    blends: dict[str, float] = {}
 
     for symbol, snap in snapshots.items():
         data = snap.data
@@ -40,7 +40,6 @@ def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
             returns = rs_returns(close, t)
             row.update({f"R{m}M": returns[m] for m in returns})
             row["RS_Blend"] = rs_blend(returns)
-            blends[symbol] = row["RS_Blend"]
         except (ValueError, KeyError):
             row["RS_Blend"] = float("nan")
 
@@ -65,28 +64,44 @@ def analyze_universe(snapshots: dict[str, DecisionSnapshot]) -> pd.DataFrame:
             row["Near_52W_High"] = False
 
         try:
-            vr = volume_ratio(volume, t)
-            row["Volume_Ratio"] = vr
+            row["Volume_Ratio"] = volume_ratio(volume, t)
         except (ValueError, KeyError):
             row["Volume_Ratio"] = float("nan")
 
         try:
-            ud = up_down_ratio(close, volume, t)
-            row["U_D"] = ud
+            row["U_D"] = up_down_ratio(close, volume, t)
         except (ValueError, KeyError):
             row["U_D"] = float("nan")
 
-        try:
-            row["AvgValue20"] = float((close * volume).loc[:t].tail(20).mean())
-        except Exception:
-            row["AvgValue20"] = float("nan")
+        # Liquidity is a UI-only filter but its mathematical input still
+        # requires 20 valid completed sessions; do not silently average fewer.
+        value = (close * volume).loc[:t].dropna()
+        if len(value) >= 20:
+            row["AvgValue20"] = float(value.iloc[-20:].mean())
+        else:
+            row["AvgValue20"] = np.nan
 
-        row["Breakout"] = breakout(
-            row.get("Stage"), float(close.loc[t]), row.get("High_52W", float("nan")), row.get("Volume_Ratio", float("nan"))
-        ) if row.get("Stage") else False
-        row["Breakout_Confirmed"] = breakout_confirmed(
-            row.get("Stage"), float(close.loc[t]), row.get("High_52W", float("nan")), row.get("Volume_Ratio", float("nan")), row.get("U_D", float("nan"))
-        ) if row.get("Stage") else False
+        row["Breakout"] = (
+            breakout(
+                row.get("Stage"),
+                float(close.loc[t]),
+                row.get("High_52W", float("nan")),
+                row.get("Volume_Ratio", float("nan")),
+            )
+            if row.get("Stage")
+            else False
+        )
+        row["Breakout_Confirmed"] = (
+            breakout_confirmed(
+                row.get("Stage"),
+                float(close.loc[t]),
+                row.get("High_52W", float("nan")),
+                row.get("Volume_Ratio", float("nan")),
+                row.get("U_D", float("nan")),
+            )
+            if row.get("Stage")
+            else False
+        )
         rows.append(row)
 
     result = pd.DataFrame(rows).set_index("Symbol")
