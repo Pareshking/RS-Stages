@@ -40,6 +40,22 @@ BREADTH_PATH = DATA_DIR / "breadth_history.csv"
 #: revision simply lacks them; the pages that need them degrade explicitly.
 V21_FIELDS = ("Close", "MA_10W", "Low_52W", "Ext_Pct", "Pct_From_52W_High", "Trend_Health")
 
+#: Fields introduced by locked-spec v2.2 — the pre-breakout structure. A
+#: snapshot published before that revision lacks them entirely, so the Setups
+#: view reports that the audit has not been re-run rather than rendering an
+#: empty table that looks like "no setups found". The two readings are opposite
+#: and a reader cannot tell them apart from an empty table alone.
+V22_FIELDS = (
+    "RS_Line",
+    "RS_Line_NH_Before_Price",
+    "Contraction_Ratio",
+    "Volume_DryUp",
+    "VCP_Setup",
+    "Pct_To_Pivot",
+    "Trend_Template_Score",
+    "Stage1_Readiness",
+)
+
 REGENERATE_HINT = (
     "Run the Real Data Research Audit workflow to publish it. Until then this "
     "section stays empty rather than showing a value the snapshot cannot support."
@@ -220,6 +236,16 @@ def load_snapshot() -> Snapshot:
             + ", ".join(absent)
             + ". "
             + REGENERATE_HINT
+        )
+
+    absent_v22 = [column for column in V22_FIELDS if column not in research.columns]
+    if absent_v22:
+        missing["v22_fields"] = (
+            "This snapshot predates locked-spec v2.2, so it carries none of the "
+            "pre-breakout structure — no RS line, contraction, volume dry-up, "
+            "pivot distance, trend template or Stage 1 readiness. Setups cannot "
+            "be listed from it, and an empty list would read as 'no setups "
+            "found' rather than 'not yet computed'. " + REGENERATE_HINT
         )
 
     previous = None
