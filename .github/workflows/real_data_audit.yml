@@ -1,12 +1,6 @@
 name: Real Data Research Audit
 
 on:
-  # TEMPORARY validation slot: 17:35 UTC is 23:05 IST. Tonight's run is brought
-  # forward purely to prove the cron fires at all — no scheduled run has ever
-  # executed, every run so far was dispatched by hand. Once one fires and is
-  # validated this moves to the agreed 18:15 UTC / 23:45 IST, which is the time
-  # the comment below describes and which the rest of this file assumes.
-  #
   # 18:15 UTC is 23:45 IST — after the NSE close settles at the provider, and
   # before the next trading session opens. The snapshot is therefore the latest
   # completed session, which is exactly the pre-market information boundary the
@@ -16,7 +10,7 @@ on:
   # run always checks out the constituent list that refresh just published and
   # never races it for the push. See tests/test_workflow_scheduling.py.
   schedule:
-    - cron: "35 17 * * 1-5"
+    - cron: "15 18 * * 1-5"
   workflow_dispatch:
     inputs:
       decision_date:
