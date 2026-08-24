@@ -3,19 +3,25 @@ name: Update Nifty Total Market Universe
 on:
   workflow_dispatch:
   schedule:
-    # 23:00 IST = 17:30 UTC, every Friday — deliberately half an hour ahead of
-    # the weekday research audit at 18:00 UTC. Two reasons, both real:
+    # 22:45 IST = 17:15 UTC, every Friday — a full hour ahead of the weekday
+    # research audit at 18:15 UTC. Two reasons for landing first, both real:
     #
     #   * The audit checks out the repository at its own start, so a universe
     #     published at the same minute would not reach the audit until the
     #     following run. Landing first means Friday's audit analyses Friday's
     #     constituent list.
-    #   * Both workflows push to main. This one finishes in about 20 seconds
+    #   * Both workflows push to main. This one finishes in about 15 seconds
     #     and the audit takes about three minutes, so sharing a fire minute
     #     rejected the audit's push non-fast-forward every Friday.
     #
+    # The hour of margin is not for the jobs, which are quick. GitHub's
+    # schedule: event is best-effort and a run can start well behind its cron
+    # under load, so the gap has to absorb that jitter rather than the runtime.
+    # The constituent list changes only on index reconstitution, so running it
+    # earlier in the evening costs nothing in freshness.
+    #
     # Enforced by tests/test_workflow_scheduling.py.
-    - cron: "30 17 * * 5"
+    - cron: "15 17 * * 5"
 
 permissions:
   contents: write

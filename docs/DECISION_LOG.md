@@ -159,11 +159,21 @@ audit by hand. A weekly, silent loss of the price history.
 
 Two changes, because the collision and the fragility are separate faults.
 
-The refresh moves to 17:30 UTC. Ordering matters beyond the collision: the
-audit checks the repository out when it starts, so a universe published at the
-same minute would not reach the audit until the following run, and Friday's
-audit would analyse Thursday's constituent list. Landing half an hour ahead
-means Friday's audit analyses the universe published that evening.
+The two are separated and ordered: the refresh at 17:15 UTC (22:45 IST) and the
+audit at 18:15 UTC (23:45 IST). Ordering matters beyond the collision itself:
+the audit checks the repository out when it starts, so a universe published at
+the same minute would not reach the audit until the following run, and Friday's
+audit would analyse Thursday's constituent list. Landing an hour ahead means
+Friday's audit analyses the universe published that evening.
+
+The hour is sized against GitHub's scheduler, not against the jobs. Measured
+per-step, the constituent CSV downloads in under a second and its whole job
+takes 15 seconds, while the audit takes 170 seconds of which 126 are the
+750-symbol price fetch. Runtime was never the constraint. `schedule:` is
+best-effort and a run can start well behind its cron under load, so the gap
+exists to absorb that jitter. The constituent list changes only on index
+reconstitution, so moving the refresh earlier in the evening costs nothing in
+freshness, which makes the margin close to free.
 
 Both pushes now rebase and retry rather than failing. Staggering removes the
 scheduled collision but not an unscheduled one — a commit pushed by hand while
