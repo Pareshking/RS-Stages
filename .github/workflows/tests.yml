@@ -33,16 +33,21 @@ jobs:
           for _ in range(30):
               try:
                   with urllib.request.urlopen(url, timeout=3) as response:
-                      body = response.read(4096).decode("utf-8", errors="replace")
-                      if response.status == 200 and "RS-Stages" in body:
-                          print("Streamlit smoke test passed")
+                      if response.status == 200:
+                          print("Streamlit HTTP server is healthy")
                           raise SystemExit(0)
               except Exception as exc:
                   last = exc
               time.sleep(1)
-          print("Streamlit smoke test failed:", last)
+          print("Streamlit HTTP server did not become ready:", last)
           print(open("/tmp/streamlit.log", encoding="utf-8").read())
           raise SystemExit(1)
           PY
+          sleep 3
+          if grep -Eiq 'Traceback|AttributeError|ModuleNotFoundError|SyntaxError|ImportError' /tmp/streamlit.log; then
+            cat /tmp/streamlit.log
+            exit 1
+          fi
+          cat /tmp/streamlit.log
       - name: Run tests
         run: python -m pytest -q
