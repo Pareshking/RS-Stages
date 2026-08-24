@@ -67,8 +67,8 @@ jobs:
               --notes "Rolling price panel for the RS-Stages terminal. Replaced by each Real Data Research Audit run; not a source release." \
               --latest=false
           fi
-          gh release upload "$DATA_TAG" data/price_panel.parquet --clobber
-          echo "Published $(du -h data/price_panel.parquet | cut -f1) panel to release $DATA_TAG"
+          gh release upload "$DATA_TAG" data/price_panel.npz --clobber
+          echo "Published $(du -h data/price_panel.npz | cut -f1) panel to release $DATA_TAG"
 
       - name: Publish validated research snapshot
         run: |
@@ -91,6 +91,6 @@ jobs:
           path: |
             data/latest_research.csv
             data/previous_research.csv
-            data/price_panel.parquet
+            data/price_panel.npz
             data/breadth_history.csv
           retention-days: 30
