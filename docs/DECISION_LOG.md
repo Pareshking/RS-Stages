@@ -139,3 +139,41 @@ losing the price chart and the participation trend at the same time, and the
 charts are how Stage and participation are read. `st.iframe` is the supported
 replacement and takes the same self-contained HTML string, so the vendored
 charting library and the dual-axis configuration are unaffected.
+
+### D-2.1.9 — The two publishing workflows are staggered, and neither push can lose a race
+
+Both scheduled workflows commit to `main`: the research audit on weekdays and
+the universe refresh on Fridays. Both were set to fire at 18:00 UTC, and the
+audit's own schedule comment recorded that as a deliberate match. It was a
+defect.
+
+Measured from the run history, the refresh completes in about twenty seconds
+and the audit takes about three minutes. On any Friday where the constituent
+list changed, the refresh would therefore land first and the audit's `git push`
+would be rejected non-fast-forward — at the audit's final step, after it had
+already replaced `price_panel.npz` on the `data-latest` release. The published
+panel would then sit one session ahead of the committed snapshot, which is
+exactly the disagreement `panel_matches` refuses to draw through: the live
+terminal would withhold every chart and sparkline until someone re-ran the
+audit by hand. A weekly, silent loss of the price history.
+
+Two changes, because the collision and the fragility are separate faults.
+
+The refresh moves to 17:30 UTC. Ordering matters beyond the collision: the
+audit checks the repository out when it starts, so a universe published at the
+same minute would not reach the audit until the following run, and Friday's
+audit would analyse Thursday's constituent list. Landing half an hour ahead
+means Friday's audit analyses the universe published that evening.
+
+Both pushes now rebase and retry rather than failing. Staggering removes the
+scheduled collision but not an unscheduled one — a commit pushed by hand while
+a three-minute audit is running would still discard the run. The audit writes
+only the three research CSVs and the refresh writes only the constituent list,
+so the two can never rebase into a conflict. Both checkouts move to
+`fetch-depth: 0`, since rebasing needs a merge base and the default depth-1
+clone has none.
+
+`tests/test_workflow_scheduling.py` pins both properties: the schedules are
+ordered with margin and share no fire minute, and every workflow that pushes
+does so through a retry with a rebase and enough history to perform it. Each
+guard was verified to fail against the configuration it replaced.

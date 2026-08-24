@@ -5,7 +5,10 @@ on:
   # before the next trading session opens. The snapshot is therefore the latest
   # completed session, which is exactly the pre-market information boundary the
   # locked spec requires. Weekdays only: NSE does not trade at the weekend.
-  # Matches the universe refresh, which already runs at 18:00 UTC on Fridays.
+  #
+  # The Friday universe refresh runs at 17:30 UTC, half an hour ahead, so this
+  # run always checks out the constituent list that refresh just published and
+  # never races it for the push. See tests/test_workflow_scheduling.py.
   schedule:
     - cron: "0 18 * * 1-5"
   workflow_dispatch:
@@ -38,6 +41,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Full history: publishing rebases onto whatever landed while this run
+          # was computing, and a depth-1 clone has no merge base to rebase onto.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -86,10 +93,32 @@ jobs:
                   data/breadth_history.csv
           if git diff --cached --quiet; then
             echo "Validated research snapshot unchanged."
-          else
-            git commit -m "data: publish validated research snapshot"
-            git push
+            exit 0
           fi
+          git commit -m "data: publish validated research snapshot"
+
+          # This job runs for about three minutes, so main can move underneath
+          # it — a human commit, or the Friday universe refresh. A bare push is
+          # then rejected non-fast-forward and the run dies at its very last
+          # step, having *already* replaced the price panel on the release. The
+          # published panel would sit one session ahead of the committed
+          # snapshot, which is precisely the drift panel_matches() refuses to
+          # draw through: the live terminal loses every chart until someone
+          # re-runs by hand.
+          #
+          # The audit writes only the three research CSVs and the universe
+          # refresh writes only the constituent list, so rebasing onto whatever
+          # landed can never conflict.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "Snapshot published on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected; rebasing onto origin/main (attempt $attempt)."
+            git pull --rebase origin main
+          done
+          echo "Could not publish the research snapshot after 5 attempts." >&2
+          exit 1
 
       - name: Upload research output
         uses: actions/upload-artifact@v4

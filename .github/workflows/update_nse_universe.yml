@@ -3,8 +3,19 @@ name: Update Nifty Total Market Universe
 on:
   workflow_dispatch:
   schedule:
-    # 23:30 IST = 18:00 UTC, every Friday.
-    - cron: "0 18 * * 5"
+    # 23:00 IST = 17:30 UTC, every Friday — deliberately half an hour ahead of
+    # the weekday research audit at 18:00 UTC. Two reasons, both real:
+    #
+    #   * The audit checks out the repository at its own start, so a universe
+    #     published at the same minute would not reach the audit until the
+    #     following run. Landing first means Friday's audit analyses Friday's
+    #     constituent list.
+    #   * Both workflows push to main. This one finishes in about 20 seconds
+    #     and the audit takes about three minutes, so sharing a fire minute
+    #     rejected the audit's push non-fast-forward every Friday.
+    #
+    # Enforced by tests/test_workflow_scheduling.py.
+    - cron: "30 17 * * 5"
 
 permissions:
   contents: write
@@ -15,6 +26,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Full history: the commit step rebases if main moved, and a depth-1
+          # clone carries no merge base to rebase onto.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -79,4 +94,17 @@ jobs:
             exit 0
           fi
           git commit -m 'data: refresh Nifty Total Market constituents'
-          git push
+
+          # Rebase rather than fail if main moved while this ran. This job
+          # writes only the constituent CSV and the research audit writes only
+          # its three output CSVs, so the rebase cannot conflict.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "Universe published on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected; rebasing onto origin/main (attempt $attempt)."
+            git pull --rebase origin main
+          done
+          echo 'Could not publish the refreshed universe after 5 attempts.' >&2
+          exit 1
