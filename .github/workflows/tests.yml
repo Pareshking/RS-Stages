@@ -18,6 +18,15 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Verify runtime dependency guard
+        run: |
+          python - <<'PY'
+          import pyarrow
+          from packaging.version import Version
+          version = Version(pyarrow.__version__)
+          print("PyArrow:", version)
+          assert version < Version("25"), "PyArrow 25+ is not allowed in the Streamlit runtime"
+          PY
       - name: Compile application and package
         run: python -m compileall -q app.py app_v7.py rs_stages tests
       - name: Streamlit production smoke test
