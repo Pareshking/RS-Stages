@@ -1,0 +1,17 @@
+[client]
+toolbarMode = "minimal"
+showErrorDetails = "viewer"
+
+[theme]
+base = "light"
+primaryColor = "#111827"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F8FA"
+textColor = "#111827"
+borderColor = "#E7E9EE"
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+font = "sans-serif"
+headingFont = "sans-serif"
+showWidgetBorder = true
+showSidebarBorder = false
