@@ -237,3 +237,298 @@ def breakout(stage: str, close: float, high52: float, vol_ratio: float) -> bool:
 
 def breakout_confirmed(stage: str, close: float, high52: float, vol_ratio: float, ud: float) -> bool:
     return breakout(stage, close, high52, vol_ratio) and ud > 1.3
+
+
+# --- v2.2: pre-breakout structure -------------------------------------------
+#
+# Every threshold below is a single named constant, because §5.1 records that
+# the trend-template figures are transcribed from a published source and must be
+# verifiable against it, and §10.5 records that the contraction thresholds are
+# ours rather than the book's. Neither claim survives if the numbers are buried
+# in expressions.
+
+#: §5.1 — Minervini trend template. Transcribed, not derived.
+TREND_TEMPLATE_LOW_MULTIPLE = 1.30      # TT6: >= 30% above the 52-week low
+TREND_TEMPLATE_HIGH_FRACTION = 0.75     # TT7: within 25% of the 52-week high
+TREND_TEMPLATE_MIN_RS = 70.0            # TT8
+TREND_TEMPLATE_RISING_SESSIONS = 21     # TT3: "at least one month"
+
+#: §4.1 — RS line.
+RS_LINE_HIGH_TOLERANCE = 0.005          # "at a new high" without float equality
+RS_LINE_PRICE_GAP_PCT = -5.0            # ours: price demonstrably off its high
+RS_LINE_MIN_OVERLAP = 200               # sessions of stock/benchmark overlap
+
+#: §10.4 / §10.5 / §10.6 — volatility, contraction, dry-up, pivot. All ours.
+ATR_SESSIONS = 14
+VCP_BASE_SESSIONS = 50
+VCP_BLOCKS = 5
+VCP_CONTRACTION_RATIO_MAX = 0.60
+VCP_VOLUME_DRYUP_MAX = 0.80
+VCP_MIN_CONTRACTIONS = 2
+VOLUME_DRYUP_RECENT = 10
+VOLUME_DRYUP_BASELINE = 50
+
+#: §11.1 — Stage 1 readiness.
+STAGE1_SLOPE_MIN = -0.10
+STAGE1_RS_MIN = 50.0
+STAGE1_CONTRACTION_MAX = 0.70
+STAGE1_DRYUP_MAX = 0.90
+
+
+def _position(index: pd.DatetimeIndex, end: pd.Timestamp) -> int:
+    """Index position of the latest session at or before ``end``."""
+    return index.searchsorted(pd.Timestamp(end), side="right") - 1
+
+
+def sma(close: pd.Series, end: pd.Timestamp, sessions: int) -> float:
+    """Session-based simple moving average ending at ``end`` inclusive.
+
+    Deliberately distinct from :func:`ma_calendar_weeks`. §5 locks the 30-week
+    average as a calendar-week construction; §5.1's criteria are stated by their
+    author in trading sessions. Thirty calendar weeks is not 150 sessions, and
+    collapsing the two would restate one author's rule in another's units.
+    """
+    c = close.sort_index().astype(float)
+    pos = _position(c.index, end)
+    if pos + 1 < sessions:
+        raise ValueError(f"Insufficient history for a {sessions}-session average")
+    return float(c.iloc[pos + 1 - sessions : pos + 1].mean())
+
+
+def sma_series(close: pd.Series, sessions: int) -> pd.Series:
+    """The same average at every session, for slope tests and charting."""
+    return close.sort_index().astype(float).rolling(sessions, min_periods=sessions).mean()
+
+
+def sma_rising(close: pd.Series, end: pd.Timestamp, sessions: int, over: int) -> bool:
+    """True when the ``sessions``-session average is higher than it was ``over`` ago."""
+    series = sma_series(close, sessions).dropna()
+    if series.empty:
+        raise ValueError(f"Insufficient history for a {sessions}-session average")
+    pos = _position(series.index, end)
+    if pos < over:
+        raise ValueError("Insufficient history to measure the average's direction")
+    return bool(series.iloc[pos] > series.iloc[pos - over])
+
+
+def trend_template(
+    close: float,
+    sma_50: float,
+    sma_150: float,
+    sma_200: float,
+    sma_200_rising: bool,
+    low_52w: float,
+    high_52w: float,
+    rs: float,
+) -> dict[str, bool | int]:
+    """§5.1 — the eight criteria, each reported separately.
+
+    A count alone cannot distinguish a stock failing only on RS from one failing
+    on six, so every criterion is published and the count is derived from them.
+    Any non-finite input fails its own criterion rather than poisoning the rest.
+    """
+    def ok(value: float) -> bool:
+        return bool(np.isfinite(value))
+
+    tt = {
+        "TT1_Above_150_200": ok(close) and ok(sma_150) and ok(sma_200)
+        and close > sma_150 and close > sma_200,
+        "TT2_150_Above_200": ok(sma_150) and ok(sma_200) and sma_150 > sma_200,
+        "TT3_200_Rising": bool(sma_200_rising),
+        "TT4_50_Above_150_200": ok(sma_50) and ok(sma_150) and ok(sma_200)
+        and sma_50 > sma_150 and sma_50 > sma_200,
+        "TT5_Above_50": ok(close) and ok(sma_50) and close > sma_50,
+        "TT6_Above_52W_Low": ok(close) and ok(low_52w)
+        and close >= low_52w * TREND_TEMPLATE_LOW_MULTIPLE,
+        "TT7_Near_52W_High": ok(close) and ok(high_52w)
+        and close >= high_52w * TREND_TEMPLATE_HIGH_FRACTION,
+        "TT8_RS": ok(rs) and rs >= TREND_TEMPLATE_MIN_RS,
+    }
+    result: dict[str, bool | int] = {k: bool(v) for k, v in tt.items()}
+    result["Trend_Template_Score"] = int(sum(result.values()))
+    result["Trend_Template_Pass"] = bool(result["Trend_Template_Score"] == len(tt))
+    return result
+
+
+def rs_line(close: pd.Series, benchmark: pd.Series) -> pd.Series:
+    """§4.1 — Close / Benchmark_Close on the sessions the two actually share.
+
+    Inner join, never a fill: a benchmark session the stock did not trade, or a
+    stock session the index did not, is dropped. Manufacturing either side's
+    price to complete the calendar would invent the very quantity being measured.
+    """
+    c, b = close.sort_index().astype(float).align(
+        benchmark.sort_index().astype(float), join="inner"
+    )
+    valid = c.notna() & b.notna() & (b != 0)
+    return (c[valid] / b[valid]).astype(float)
+
+
+def rs_line_high_52w(line: pd.Series, end: pd.Timestamp, min_sessions: int = RS_LINE_MIN_OVERLAP) -> float:
+    """Highest RS line value across the trailing 52 calendar weeks."""
+    window = calendar_window(line, end, 52)
+    if len(window) < min_sessions:
+        raise ValueError("Insufficient stock/benchmark overlap for a 52-week RS line high")
+    return float(window.max())
+
+
+def rs_line_at_high(line_value: float, line_high: float) -> bool:
+    """Within tolerance of the 52-week RS line high."""
+    if not (np.isfinite(line_value) and np.isfinite(line_high)) or line_high == 0:
+        return False
+    return bool(line_value >= line_high * (1.0 - RS_LINE_HIGH_TOLERANCE))
+
+
+def rs_line_nh_before_price(line_value: float, line_high: float, pct_from_52w_high: float) -> bool:
+    """§4.1 — relative strength at a new high while price is not.
+
+    The ordering is the signal. A stock making new price highs is already
+    advancing and is O'Neil's breakout, not his leading tell; the case worth
+    naming is strength leading price out of a base.
+    """
+    if not np.isfinite(pct_from_52w_high):
+        return False
+    return rs_line_at_high(line_value, line_high) and bool(
+        pct_from_52w_high <= RS_LINE_PRICE_GAP_PCT
+    )
+
+
+def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
+    """Wilder's true range; undefined on the first session, which has no prior close."""
+    h, l = high.sort_index().astype(float), low.sort_index().astype(float)
+    c = close.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    h, c = h.align(c, join="inner")
+    l = l.reindex(h.index)
+    prev = c.shift(1)
+    return pd.concat([h - l, (h - prev).abs(), (l - prev).abs()], axis=1).max(axis=1)
+
+
+def atr_pct(high: pd.Series, low: pd.Series, close: pd.Series, end: pd.Timestamp) -> float:
+    """§10.4 — ATR(14) as a percentage of the closing price."""
+    tr = true_range(high, low, close).dropna()
+    pos = _position(tr.index, end)
+    if pos + 1 < ATR_SESSIONS:
+        raise ValueError("Insufficient history for ATR(14)")
+    atr = float(tr.iloc[pos + 1 - ATR_SESSIONS : pos + 1].mean())
+    c = close.sort_index().astype(float)
+    last = float(c.iloc[_position(c.index, end)])
+    if not np.isfinite(last) or last == 0:
+        return float("nan")
+    return atr / last * 100.0
+
+
+def range_blocks(
+    high: pd.Series, low: pd.Series, close: pd.Series, end: pd.Timestamp
+) -> list[float]:
+    """§10.5 — each block's high-low range as a percentage of its mean close.
+
+    Five consecutive ten-session blocks across the fifty-session base, oldest
+    first. Fixed blocks rather than detected swings: swing detection needs its
+    own tunable definition of a swing, and a second undocumented parameter set
+    inside a pattern the source already leaves qualitative is exactly what §1
+    warns against.
+    """
+    h, l = high.sort_index().astype(float), low.sort_index().astype(float)
+    c = close.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    c = c.reindex(h.index)
+    pos = _position(h.index, end)
+    if pos + 1 < VCP_BASE_SESSIONS:
+        raise ValueError("Insufficient history for the contraction base")
+    size = VCP_BASE_SESSIONS // VCP_BLOCKS
+    start = pos + 1 - VCP_BASE_SESSIONS
+    out: list[float] = []
+    for block in range(VCP_BLOCKS):
+        lo = start + block * size
+        window_h, window_l = h.iloc[lo : lo + size], l.iloc[lo : lo + size]
+        mean_close = float(c.iloc[lo : lo + size].mean())
+        if not np.isfinite(mean_close) or mean_close == 0:
+            return [float("nan")] * VCP_BLOCKS
+        out.append((float(window_h.max()) - float(window_l.min())) / mean_close * 100.0)
+    return out
+
+
+def vcp_contractions(blocks: list[float]) -> int:
+    """How many times the range tightened against the block before it."""
+    return int(
+        sum(
+            1
+            for a, b in zip(blocks, blocks[1:])
+            if np.isfinite(a) and np.isfinite(b) and b < a
+        )
+    )
+
+
+def contraction_ratio(blocks: list[float]) -> float:
+    """Final block's range against the first: below 1 means the base is tightening."""
+    if len(blocks) < 2 or not np.isfinite(blocks[0]) or blocks[0] == 0:
+        return float("nan")
+    if not np.isfinite(blocks[-1]):
+        return float("nan")
+    return blocks[-1] / blocks[0]
+
+
+def volume_dryup(volume: pd.Series, end: pd.Timestamp) -> float:
+    """§10.5 — recent volume against the longer baseline preceding it.
+
+    The opposite instrument to :func:`volume_ratio`, which compares one session
+    to a baseline and so detects the breakout spike. This compares a sustained
+    window to a longer one and detects the drought that precedes it.
+    """
+    v = volume.sort_index().astype(float)
+    pos = _position(v.index, end)
+    needed = VOLUME_DRYUP_RECENT + VOLUME_DRYUP_BASELINE
+    if pos + 1 < needed:
+        raise ValueError("Insufficient history for the volume dry-up baseline")
+    recent_start = pos + 1 - VOLUME_DRYUP_RECENT
+    recent = float(v.iloc[recent_start : pos + 1].mean())
+    baseline = float(v.iloc[recent_start - VOLUME_DRYUP_BASELINE : recent_start].mean())
+    if not np.isfinite(baseline) or baseline == 0:
+        return float("nan")
+    return recent / baseline
+
+
+def vcp_setup(ratio: float, dryup: float, contractions: int) -> bool:
+    """§10.5 — tightening range, drying volume, and more than a single step."""
+    if not (np.isfinite(ratio) and np.isfinite(dryup)):
+        return False
+    return bool(
+        ratio <= VCP_CONTRACTION_RATIO_MAX
+        and dryup <= VCP_VOLUME_DRYUP_MAX
+        and contractions >= VCP_MIN_CONTRACTIONS
+    )
+
+
+def vcp_pivot(high: pd.Series, end: pd.Timestamp) -> float:
+    """§10.6 — the highest high of the base: the buy point at its top."""
+    h = high.sort_index().astype(float)
+    pos = _position(h.index, end)
+    if pos + 1 < VCP_BASE_SESSIONS:
+        raise ValueError("Insufficient history for the base pivot")
+    return float(h.iloc[pos + 1 - VCP_BASE_SESSIONS : pos + 1].max())
+
+
+def pct_to_pivot(close: float, pivot: float) -> float:
+    """Distance still to travel; zero at the pivot and negative once through it."""
+    if not (np.isfinite(close) and np.isfinite(pivot)) or close == 0:
+        return float("nan")
+    return (pivot / close - 1.0) * 100.0
+
+
+def stage1_readiness(
+    slope_pct: float, rs: float, ratio: float, dryup: float, close: float, ma_10w: float
+) -> int:
+    """§11.1 — how ready a base looks, counted 0-5.
+
+    Ranking only. No locked signal reads this, and a Stage 1 stock scoring five
+    still carries the Stage 1 action.
+    """
+    checks = (
+        np.isfinite(slope_pct) and slope_pct >= STAGE1_SLOPE_MIN,
+        np.isfinite(rs) and rs >= STAGE1_RS_MIN,
+        np.isfinite(ratio) and ratio <= STAGE1_CONTRACTION_MAX,
+        np.isfinite(dryup) and dryup <= STAGE1_DRYUP_MAX,
+        np.isfinite(close) and np.isfinite(ma_10w) and close > ma_10w,
+    )
+    return int(sum(bool(c) for c in checks))
