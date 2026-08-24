@@ -60,27 +60,72 @@ def calendar_window(series: pd.Series, end: pd.Timestamp, weeks: int) -> pd.Seri
     return s.loc[(s.index >= start_ref) & (s.index <= t)]
 
 
-def ma_30w(close: pd.Series, end: pd.Timestamp) -> float:
-    """30-calendar-week simple moving average using calendar start as-of session."""
+def ma_calendar_weeks(close: pd.Series, end: pd.Timestamp, weeks: int) -> float:
+    """Simple moving average over every valid session in a calendar-week window.
+
+    This is the single locked moving-average definition. The window starts at
+    the last observed session on or before ``end - weeks`` and ends at the last
+    observed session on or before ``end``. It is deliberately *not* a fixed
+    trading-day row count, so the number of observations varies with holidays.
+    """
     s = close.sort_index().dropna()
     t = calendar_asof(s.index, pd.Timestamp(end))
-    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=30))
+    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=weeks))
     window = s.loc[(s.index >= start_ref) & (s.index <= t)]
     if len(window) < 2:
-        raise ValueError("Insufficient history for 30W MA window")
+        raise ValueError(f"Insufficient history for {weeks}W MA window")
     return float(window.mean())
+
+
+def ma_calendar_weeks_series(close: pd.Series, weeks: int) -> pd.Series:
+    """Calendar-window MA at each session, evaluated as of that session.
+
+    Values are identical to calling :func:`ma_calendar_weeks` at every session;
+    window boundaries are resolved by position instead of by repeated sorting so
+    the per-symbol cost is linear rather than quadratic. Sessions without a
+    complete reference window yield NaN rather than a partial-window average.
+    """
+    raw = close.sort_index()
+    clean = raw.dropna()
+    if clean.empty:
+        return pd.Series(np.nan, index=raw.index, dtype=float)
+
+    raw_index = pd.DatetimeIndex(raw.index)
+    ends = clean.index.searchsorted(raw_index, side="right") - 1
+    effective = clean.index[np.clip(ends, 0, None)]
+    starts = clean.index.searchsorted(effective - pd.Timedelta(weeks=weeks), side="right") - 1
+
+    values = np.full(len(raw_index), np.nan, dtype=float)
+    for position, (start, end) in enumerate(zip(starts, ends)):
+        if start < 0 or end < 0 or (end - start + 1) < 2:
+            continue
+        values[position] = float(clean.iloc[start : end + 1].mean())
+    return pd.Series(values, index=raw.index, dtype=float)
+
+
+def ma_30w(close: pd.Series, end: pd.Timestamp) -> float:
+    """30-calendar-week simple moving average using calendar start as-of session."""
+    return ma_calendar_weeks(close, end, 30)
 
 
 def ma_30w_series(close: pd.Series) -> pd.Series:
     """Calendar-window 30W MA at each session where a reference session exists."""
-    s = close.sort_index()
-    values = []
-    for t in s.index:
-        try:
-            values.append(ma_30w(s, t))
-        except ValueError:
-            values.append(np.nan)
-    return pd.Series(values, index=s.index, dtype=float)
+    return ma_calendar_weeks_series(close, 30)
+
+
+def ma_10w(close: pd.Series, end: pd.Timestamp) -> float:
+    """10-calendar-week simple moving average.
+
+    Adopted in locked-spec v2.1 as the shorter trend reference. It uses exactly
+    the same calendar-window construction as the 30-week MA so the two lines are
+    directly comparable; it is not a 50-row trading-day average.
+    """
+    return ma_calendar_weeks(close, end, 10)
+
+
+def ma_10w_series(close: pd.Series) -> pd.Series:
+    """Calendar-window 10W MA at each session where a reference session exists."""
+    return ma_calendar_weeks_series(close, 10)
 
 
 def ma_slope_pct(ma: pd.Series, end: pd.Timestamp, sessions: int = 10) -> float:
@@ -120,6 +165,22 @@ def high_52w(close_high: pd.Series, end: pd.Timestamp, min_sessions: int = 200) 
     if len(window) < min_sessions:
         raise ValueError("Insufficient history for 52W high")
     return float(window.max())
+
+
+def low_52w(close_low: pd.Series, end: pd.Timestamp, min_sessions: int = 200) -> float:
+    """Minimum adjusted Low in a 52-calendar-week window.
+
+    Mirrors :func:`high_52w` exactly — same calendar window, same minimum
+    observation count — so the pair defines a symmetric 52-week range. It is a
+    presentation/range input only; no locked signal consumes it.
+    """
+    s = close_low.sort_index().dropna()
+    t = calendar_asof(s.index, pd.Timestamp(end))
+    start_ref = calendar_asof(s.index, t - pd.Timedelta(weeks=52))
+    window = s.loc[(s.index >= start_ref) & (s.index <= t)]
+    if len(window) < min_sessions:
+        raise ValueError("Insufficient history for 52W low")
+    return float(window.min())
 
 
 def near_52w_high(close: float, high52: float, threshold: float = 0.03) -> bool:
