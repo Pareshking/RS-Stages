@@ -32,19 +32,35 @@ def independent_rs(close: pd.Series, decision: pd.Timestamp) -> dict[int, float]
     return out
 
 
+def resolve_dates(decision_arg: str | None, start_arg: str | None, end_arg: str | None) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+    """Resolve optional audit dates using the current date in Asia/Kolkata.
+
+    The decision date is a calendar date, not a market-data observation. The
+    production snapshot layer resolves it to the latest permitted completed
+    NSE session, so no current-session data can enter a pre-market audit.
+    """
+    now_ist = pd.Timestamp.now(tz="Asia/Kolkata")
+    decision = pd.Timestamp(decision_arg) if decision_arg else now_ist.tz_localize(None).normalize()
+    start = pd.Timestamp(start_arg) if start_arg else decision - pd.Timedelta(days=500)
+    end = pd.Timestamp(end_arg) if end_arg else decision + pd.Timedelta(days=1)
+    if start >= end:
+        raise ValueError("Audit start date must be before end date")
+    return decision, start, end
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--universe", required=True)
-    ap.add_argument("--decision-date", required=True)
-    ap.add_argument("--start", required=True)
-    ap.add_argument("--end", required=True)
+    ap.add_argument("--decision-date")
+    ap.add_argument("--start")
+    ap.add_argument("--end")
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
-    decision = pd.Timestamp(args.decision_date)
+    decision, start, end = resolve_dates(args.decision_date, args.start, args.end)
     universe = pd.read_csv(args.universe)
     snapshots = acquire_and_build_universe_snapshots(
-        args.universe, args.start, args.end, decision
+        args.universe, start, end, decision
     ).snapshots
     result = analyze_universe(snapshots)
 
@@ -67,6 +83,8 @@ def main() -> None:
     if failures:
         raise SystemExit("Independent RS reconciliation failures:\n" + "\n".join(failures[:50]))
 
+    print(f"Decision date: {decision.date()}")
+    print(f"Yahoo history: {start.date()} to {end.date()} exclusive")
     print(f"Universe rows: {len(universe)}")
     print(f"Research rows: {len(result)}")
     print(f"RS reconciliation failures: {len(failures)}")
