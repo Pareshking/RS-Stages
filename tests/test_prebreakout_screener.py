@@ -174,3 +174,41 @@ def test_short_history_publishes_insufficiency_rather_than_numbers(histories):
     assert not result["SMA_200_Rising"].any()
     assert not result["TT1_Above_150_200"].any()
     assert not result["Trend_Template_Pass"].any()
+
+
+def test_a_provider_row_without_a_close_is_not_the_information_boundary(histories):
+    """§3 — an empty row is not a completed session.
+
+    Yahoo publishes a dated row before its values are final. Adopting that row
+    as the boundary shifts every calendar window one session late, so the
+    30-week average, its slope, Stage and every v2.2 field disagree with any
+    recalculation that dropped the empty row first. This is what failed the
+    first scheduled audit run.
+    """
+    frame = histories["SYM0"].copy()
+    frame.loc[frame.index[-1], ["Close", "High", "Low", "Volume"]] = np.nan
+    snapshot = build_decision_snapshot(frame, DECISION)
+
+    # The boundary steps back to the last session carrying a Close.
+    assert snapshot.latest_completed_session == frame.index[-2]
+    assert pd.notna(snapshot.data["Close"].loc[snapshot.latest_completed_session])
+
+    # And the published row is computable rather than NaN.
+    result = analyze_universe({"SYM0": snapshot})
+    assert pd.notna(result.loc["SYM0", "MA_30W"])
+    assert result.loc["SYM0", "Stage"] is not None
+    assert str(result.loc["SYM0", "Stage"]).startswith("Stage")
+
+
+def test_interior_empty_rows_do_not_move_the_boundary(histories):
+    """Only the boundary is chosen this way; interior history is untouched."""
+    frame = histories["SYM1"].copy()
+    frame.loc[frame.index[-40], ["Close", "High", "Low", "Volume"]] = np.nan
+    snapshot = build_decision_snapshot(frame, DECISION)
+    assert snapshot.latest_completed_session == frame.index[-1]
+    # A window mean skips the NaN, so the average matches one computed from a
+    # frame that never carried the row at all.
+    without = build_decision_snapshot(frame.dropna(subset=["Close"]), DECISION)
+    a = analyze_universe({"S": snapshot}).loc["S", "MA_30W"]
+    b = analyze_universe({"S": without}).loc["S", "MA_30W"]
+    assert np.isclose(a, b, rtol=0, atol=1e-12)
