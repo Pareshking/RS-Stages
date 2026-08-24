@@ -96,6 +96,10 @@ def ma_slope_pct(ma: pd.Series, end: pd.Timestamp, sessions: int = 10) -> float:
 
 
 def classify_stage(close: float, ma: float, slope_pct: float) -> str:
+    """Classify the locked 30W-MA stage using strict comparisons."""
+    values = (close, ma, slope_pct)
+    if not all(np.isfinite(float(value)) for value in values):
+        raise ValueError("Stage classification requires finite Close, MA and slope")
     above = close > ma
     rising = slope_pct > 0.0
     if above and rising:
