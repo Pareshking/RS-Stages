@@ -127,6 +127,62 @@ def independent_low52(low: pd.Series, decision: pd.Timestamp) -> float:
     return float(window.min())
 
 
+def independent_sma(close: pd.Series, decision: pd.Timestamp, sessions: int) -> float:
+    """v2.2 §5.1 — session average by plain summation, no rolling window."""
+    values = [float(v) for stamp, v in close.sort_index().items() if stamp <= decision]
+    if len(values) < sessions:
+        raise ValueError("insufficient history")
+    window = values[-sessions:]
+    return sum(window) / len(window)
+
+
+def independent_contraction(
+    high: pd.Series, low: pd.Series, close: pd.Series, decision: pd.Timestamp
+) -> tuple[int, float]:
+    """v2.2 §10.5 — block ranges rebuilt by iteration rather than slicing."""
+    rows = [
+        (float(h), float(low.loc[stamp]), float(close.loc[stamp]))
+        for stamp, h in high.sort_index().items()
+        if stamp <= decision and stamp in low.index and stamp in close.index
+    ]
+    if len(rows) < 50:
+        raise ValueError("insufficient history")
+    base = rows[-50:]
+    ranges = []
+    for block in range(5):
+        chunk = base[block * 10 : block * 10 + 10]
+        highs = [r[0] for r in chunk]
+        lows = [r[1] for r in chunk]
+        closes = [r[2] for r in chunk]
+        mean_close = sum(closes) / len(closes)
+        if mean_close == 0:
+            raise ValueError("degenerate base")
+        ranges.append((max(highs) - min(lows)) / mean_close * 100.0)
+    tightenings = sum(1 for a, b in zip(ranges, ranges[1:]) if b < a)
+    return tightenings, ranges[-1] / ranges[0]
+
+
+def independent_volume_dryup(volume: pd.Series, decision: pd.Timestamp) -> float:
+    """v2.2 §10.5 — the drought measure, summed by hand."""
+    values = [float(v) for stamp, v in volume.sort_index().items() if stamp <= decision]
+    if len(values) < 60:
+        raise ValueError("insufficient history")
+    recent = values[-10:]
+    baseline = values[-60:-10]
+    mean_baseline = sum(baseline) / len(baseline)
+    if mean_baseline == 0:
+        raise ValueError("degenerate baseline")
+    return (sum(recent) / len(recent)) / mean_baseline
+
+
+def independent_pivot(high: pd.Series, decision: pd.Timestamp) -> float:
+    """v2.2 §10.6 — the base high, by max over an explicit list."""
+    values = [float(v) for stamp, v in high.sort_index().items() if stamp <= decision]
+    if len(values) < 50:
+        raise ValueError("insufficient history")
+    return max(values[-50:])
+
+
 def independent_volume_ratio(volume: pd.Series, decision: pd.Timestamp) -> float:
     s = volume.sort_index().astype(float)
     pos = s.index.searchsorted(pd.Timestamp(decision), side="right") - 1
@@ -222,12 +278,43 @@ def main() -> None:
         except ValueError:
             continue
 
-    result, trends = analyze_universe_with_trend(snapshots, trend_sessions=PANEL_SESSIONS)
-    previous_result = analyze_universe(previous_snapshots) if previous_snapshots else pd.DataFrame()
+    # Benchmark, fetched before the analysis because §4.1's RS line consumes it.
+    # Over the full acquisition window rather than the breadth window: the RS
+    # line needs 52 calendar weeks of stock/benchmark overlap, which the breadth
+    # window does not guarantee. Reused for breadth alignment further down, so
+    # this is one download, not two.
+    #
+    # A failure here must not fail the audit. The index is external and the RS
+    # line degrades to unavailable; breadth is ours and computed either way.
+    benchmark_ticker = INDEX_TICKERS[BENCHMARK_KEY]
+    benchmark_close: pd.Series | None = None
+    try:
+        benchmark_close = download_index_history(
+            benchmark_ticker, start=start, end=end
+        )["Close"].astype(float)
+        print(
+            f"Benchmark {benchmark_ticker}: {len(benchmark_close)} sessions "
+            f"{benchmark_close.index.min().date()} to {benchmark_close.index.max().date()}"
+        )
+    except (ImportError, ValueError, KeyError, OSError) as exc:
+        print(
+            f"Benchmark {benchmark_ticker} unavailable ({type(exc).__name__}); "
+            "the RS line and the breadth index column are published as unavailable"
+        )
+
+    result, trends = analyze_universe_with_trend(
+        snapshots, trend_sessions=PANEL_SESSIONS, benchmark=benchmark_close
+    )
+    previous_result = (
+        analyze_universe(previous_snapshots, benchmark=benchmark_close)
+        if previous_snapshots
+        else pd.DataFrame()
+    )
 
     failures = []
     checked_stage = checked_high = checked_volume = checked_ud = checked_liquidity = 0
     checked_ma_10w = checked_low = checked_trend = 0
+    checked_sma = checked_contraction = checked_dryup = checked_pivot = 0
     for symbol, snap in snapshots.items():
         close = snap.data["Close"].astype(float)
         high = snap.data["High"].astype(float)
@@ -260,6 +347,46 @@ def main() -> None:
             checked_high += 1
             if not np.isclose(result.loc[symbol, "High_52W"], expected, rtol=0, atol=1e-12): failures.append(f"{symbol}: 52W high mismatch")
         except ValueError:
+            pass
+
+        # --- v2.2 -----------------------------------------------------------
+        for sessions, field in ((150, "SMA_150"), (200, "SMA_200")):
+            try:
+                expected = independent_sma(close, t, sessions)
+                checked_sma += 1
+                if not np.isclose(result.loc[symbol, field], expected, rtol=0, atol=1e-9):
+                    failures.append(f"{symbol}: {field} mismatch")
+            except (ValueError, KeyError):
+                pass
+
+        if "Low" in snap.data.columns:
+            try:
+                low_series = snap.data["Low"].astype(float)
+                exp_count, exp_ratio = independent_contraction(high, low_series, close, t)
+                checked_contraction += 1
+                if int(result.loc[symbol, "VCP_Contractions"]) != exp_count:
+                    failures.append(f"{symbol}: VCP_Contractions mismatch")
+                if not np.isclose(
+                    result.loc[symbol, "Contraction_Ratio"], exp_ratio, rtol=0, atol=1e-9
+                ):
+                    failures.append(f"{symbol}: Contraction_Ratio mismatch")
+            except (ValueError, KeyError):
+                pass
+
+        try:
+            expected = independent_volume_dryup(volume, t)
+            checked_dryup += 1
+            if not np.isclose(result.loc[symbol, "Volume_DryUp"], expected, rtol=0, atol=1e-9):
+                failures.append(f"{symbol}: Volume_DryUp mismatch")
+        except (ValueError, KeyError):
+            pass
+
+        try:
+            expected = independent_pivot(high, t)
+            checked_pivot += 1
+            if not np.isclose(result.loc[symbol, "VCP_Pivot"], expected, rtol=0, atol=1e-9):
+                failures.append(f"{symbol}: VCP_Pivot mismatch")
+        except (ValueError, KeyError):
             pass
 
         try:
@@ -388,23 +515,14 @@ def main() -> None:
     # is an external convenience, so the column is simply absent and the chart
     # says so.
     if not breadth.empty:
-        ticker = INDEX_TICKERS[BENCHMARK_KEY]
-        try:
-            index_history = download_index_history(
-                ticker,
-                start=pd.Timestamp(breadth["Date"].min()),
-                end=pd.Timestamp(breadth["Date"].max()) + pd.Timedelta(days=1),
-            )
-            # Deliberately not named `closes`: that is the panel's 2-D grid,
-            # and shadowing it here silently broke the run summary.
-            benchmark_close = index_history["Close"].astype(float)
+        if benchmark_close is not None:
             aligned = benchmark_close.reindex(pd.DatetimeIndex(breadth["Date"]))
             breadth["Benchmark_Close"] = aligned.to_numpy()
-            breadth["Benchmark_Ticker"] = ticker
+            breadth["Benchmark_Ticker"] = benchmark_ticker
             covered = int(breadth["Benchmark_Close"].notna().sum())
-            print(f"Benchmark {ticker}: {covered} of {len(breadth)} sessions aligned")
-        except (ImportError, ValueError, KeyError, OSError) as exc:
-            print(f"Benchmark {ticker} unavailable ({type(exc).__name__}); breadth published without it")
+            print(f"Benchmark {benchmark_ticker}: {covered} of {len(breadth)} sessions aligned")
+        else:
+            print("Benchmark absent; breadth published without the index column")
 
         breadth.to_csv(breadth_path, index=False)
 
@@ -417,6 +535,12 @@ def main() -> None:
     print(f"Research rows: {len(result)}")
     print(f"Independent checks: stage={checked_stage}, high52={checked_high}, volume={checked_volume}, ud={checked_ud}, liquidity={checked_liquidity}")
     print(f"Independent checks (v2.1): ma10w={checked_ma_10w}, low52={checked_low}, trend_panel={checked_trend}")
+    print(
+        f"Independent checks (v2.2): sma={checked_sma}, contraction={checked_contraction}, "
+        f"dryup={checked_dryup}, pivot={checked_pivot}"
+    )
+    rs_line_rows = int(result["RS_Line"].notna().sum()) if "RS_Line" in result.columns else 0
+    print(f"RS line computed for {rs_line_rows} of {len(result)} symbols")
     print(f"Previous-session rows: {len(previous_result)}")
     sessions_n, symbols_n = closes.shape
     print(f"Price panel grid: {sessions_n} sessions x {symbols_n} symbols")
