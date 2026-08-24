@@ -9,6 +9,7 @@ import pandas as pd
 from rs_stages.pipeline import acquire_and_build_universe_snapshots
 from rs_stages.screener import analyze_universe
 from rs_stages.quant import rs_blend, rs_returns
+from rs_stages.data import load_nse_constituents_csv
 
 
 def independent_calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp:
@@ -33,12 +34,7 @@ def independent_rs(close: pd.Series, decision: pd.Timestamp) -> dict[int, float]
 
 
 def resolve_dates(decision_arg: str | None, start_arg: str | None, end_arg: str | None) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
-    """Resolve optional audit dates using the current date in Asia/Kolkata.
-
-    The decision date is a calendar date, not a market-data observation. The
-    production snapshot layer resolves it to the latest permitted completed
-    NSE session, so no current-session data can enter a pre-market audit.
-    """
+    """Resolve optional audit dates using the current date in Asia/Kolkata."""
     now_ist = pd.Timestamp.now(tz="Asia/Kolkata")
     decision = pd.Timestamp(decision_arg) if decision_arg else now_ist.tz_localize(None).normalize()
     start = pd.Timestamp(start_arg) if start_arg else decision - pd.Timedelta(days=500)
@@ -58,7 +54,7 @@ def main() -> None:
     args = ap.parse_args()
 
     decision, start, end = resolve_dates(args.decision_date, args.start, args.end)
-    universe = pd.read_csv(args.universe)
+    universe = load_nse_constituents_csv(args.universe)
     snapshots = acquire_and_build_universe_snapshots(
         args.universe, start, end, decision
     ).snapshots
@@ -85,7 +81,7 @@ def main() -> None:
 
     print(f"Decision date: {decision.date()}")
     print(f"Yahoo history: {start.date()} to {end.date()} exclusive")
-    print(f"Universe rows: {len(universe)}")
+    print(f"Universe rows after DUMMY exclusion: {len(universe)}")
     print(f"Research rows: {len(result)}")
     print(f"RS reconciliation failures: {len(failures)}")
     print(f"Stage counts:\n{result['Stage'].value_counts(dropna=False).to_string()}")
