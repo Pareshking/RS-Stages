@@ -1,0 +1,34 @@
+name: Consolidate Streamlit entrypoint
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    if: "!contains(github.event.head_commit.message, 'chore: consolidate Streamlit entrypoint')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Consolidate app.py
+        run: |
+          test -f app_v7.py
+          cp app_v7.py app.py
+          rm app_v7.py
+          rm .github/workflows/merge-app-entrypoint.yml
+
+      - name: Commit consolidated application
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py app_v7.py .github/workflows/merge-app-entrypoint.yml
+          git commit -m "chore: consolidate Streamlit entrypoint" \
+            -m "Make app.py the single executable Streamlit application and remove the import/reload indirection."
+          git push origin HEAD:main
