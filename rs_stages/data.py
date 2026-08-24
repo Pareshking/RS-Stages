@@ -1,8 +1,10 @@
 """Production data-boundary primitives for RS-Stages.
 
 This module deliberately separates acquisition from quantitative calculations.
-The key invariant is that pre-market decisions can only consume the latest
-completed session; the upcoming/incomplete session is excluded at the boundary.
+The key invariant is that pre-market decisions for session D can only consume
+information through the latest completed session strictly before D. Even if a
+provider already contains D because the market has closed, D is excluded from
+that decision's information set.
 """
 from __future__ import annotations
 
@@ -22,15 +24,11 @@ class DecisionSnapshot:
 
 
 def normalize_session_index(frame: pd.DataFrame) -> pd.DataFrame:
-    """Normalize a market-data frame to a sorted, unique tz-naive DatetimeIndex.
-
-    Duplicate sessions are rejected rather than silently aggregated.
-    """
+    """Normalize a market-data frame to a sorted, unique tz-naive DatetimeIndex."""
     if not isinstance(frame.index, pd.DatetimeIndex):
         raise TypeError("Market data must use a DatetimeIndex")
     if frame.index.has_duplicates:
         raise ValueError("Duplicate market-data sessions detected")
-
     out = frame.copy()
     idx = pd.DatetimeIndex(out.index)
     if idx.tz is not None:
@@ -42,7 +40,7 @@ def normalize_session_index(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def latest_completed_session(index: pd.DatetimeIndex, decision_date: pd.Timestamp) -> pd.Timestamp:
-    """Resolve the latest available session at or before a pre-market decision date."""
+    """Resolve the latest completed session strictly before decision session D."""
     idx = pd.DatetimeIndex(index).sort_values().unique()
     if idx.tz is not None:
         idx = idx.tz_convert(None)
@@ -50,15 +48,13 @@ def latest_completed_session(index: pd.DatetimeIndex, decision_date: pd.Timestam
     if decision.tzinfo is not None:
         decision = decision.tz_convert(None)
     decision = decision.normalize()
-    pos = idx.searchsorted(decision, side="right") - 1
+    pos = idx.searchsorted(decision, side="left") - 1
     if pos < 0:
         raise ValueError("No completed market session exists before decision date")
     return idx[pos]
 
 
-def build_decision_snapshot(
-    market_data: pd.DataFrame, decision_date: pd.Timestamp
-) -> DecisionSnapshot:
+def build_decision_snapshot(market_data: pd.DataFrame, decision_date: pd.Timestamp) -> DecisionSnapshot:
     """Freeze the information set available before the upcoming session opens."""
     data = normalize_session_index(market_data)
     decision = pd.Timestamp(decision_date)
