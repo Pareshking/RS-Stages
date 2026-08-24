@@ -67,6 +67,29 @@ def test_sma_rising_reads_the_direction_over_the_stated_window():
     assert not quant.sma_rising(falling, END, 200, quant.TREND_TEMPLATE_RISING_SESSIONS)
 
 
+def test_a_session_average_skips_missing_closes_rather_than_short_counting():
+    """§5.1 — N sessions means N closes that exist.
+
+    Averaging whatever survives inside a fixed N-slot slice reports the mean of
+    N-1 observations as an N-session average, and the shortfall is invisible.
+    This is what failed audit run 22: a NaN close 180 sessions back sat inside
+    the 200-session window and outside the 150-session one, so SMA_200
+    disagreed with an independent recalculation while SMA_150 agreed.
+    """
+    idx = pd.bdate_range(end=END, periods=300)
+    series = pd.Series(np.arange(100.0, 400.0), index=idx)
+    series.iloc[-180] = np.nan
+
+    valid = [v for v in series if not np.isnan(v)]
+    assert quant.sma(series, END, 150) == pytest.approx(sum(valid[-150:]) / 150, rel=1e-12)
+    assert quant.sma(series, END, 200) == pytest.approx(sum(valid[-200:]) / 200, rel=1e-12)
+
+    # The gap is outside the 150 window, so only the 200 average moves.
+    clean = series.dropna()
+    assert quant.sma(series, END, 150) == pytest.approx(quant.sma(clean, END, 150))
+    assert quant.sma(series, END, 200) == pytest.approx(quant.sma(clean, END, 200))
+
+
 def test_short_history_refuses_rather_than_averaging_what_it_has():
     data = _frame(periods=40)
     with pytest.raises(ValueError):
