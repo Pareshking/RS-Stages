@@ -1,6 +1,6 @@
 # RS-Stages — Locked Quantitative Specification
 
-**Status:** LOCKED INPUTS — v1.1
+**Status:** LOCKED INPUTS — v1.2
 **Date:** 2026-08-24
 **Repository:** `Pareshking/RS-Stages`
 **Primary technology:** Streamlit
@@ -18,12 +18,15 @@ Performance or backtest improvement is never sufficient reason to change a locke
 
 ## 2. Universe and Sector Classification
 
-- Mathematical universe: symbols supplied by the NSE constituent CSV used by RS-Stages.
+- **Production universe:** official Nifty Total Market constituent CSV: `https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv`
+- The Nifty Total Market is the project's broad equity universe and is described by NSE Indices as covering 750 stocks across large, mid, small and microcap segments. The downloaded official CSV is authoritative for the actual live constituent count; do not hard-code exactly 750 if the official source contains a different count. citeturn0search0turn0search1
+- Repository snapshot: `data/ind_niftytotalmarket_list.csv`.
 - Industry classification: exactly the CSV `Industry` field.
 - No F&O filtering.
 - No WealthStar sector remapping.
 - No consolidation unless explicitly decided later.
 - Optional liquidity filtering must not reduce the cross-sectional RS ranking universe.
+- The constituent CSV is refreshed every Friday at approximately **23:30 IST** by GitHub Actions and committed to the repository when changed.
 
 ## 3. Market Data
 
@@ -237,7 +240,7 @@ Future historical RS-line research requires a separate methodology decision.
 - The upcoming decision session is excluded globally.
 - Volume baseline excludes the latest session's own volume.
 - U/D includes the latest completed session and excludes the upcoming session.
-- Cross-sectional ranking occurs against the specified mathematical universe before optional UI filters.
+- Cross-sectional ranking occurs against the specified Nifty Total Market mathematical universe before optional UI filters.
 - Missing history produces explicit insufficiency, never fabricated values.
 - Forward filling/interpolation requires explicit quantitative justification.
 - Optimizations require numerical regression testing against an independent/reference calculation.
@@ -246,7 +249,9 @@ Future historical RS-line research requires a separate methodology decision.
 
 | Topic | Locked production definition |
 |---|---|
-| Universe | NSE constituent CSV symbols |
+| Universe | Official Nifty Total Market constituent CSV |
+| Universe source | `ind_niftytotalmarket_list.csv` |
+| Universe storage | `data/ind_niftytotalmarket_list.csv` |
 | Industry | Exact NSE CSV `Industry` field |
 | F&O filtering | None |
 | Data source | yfinance |
@@ -269,7 +274,8 @@ Future historical RS-line research requires a separate methodology decision.
 | Breakout Confirmed | Breakout + U/D >1.3 |
 | Liquidity | Optional UI-only, 20-session avg Close×Volume > ₹5Cr |
 | RS Line | Current download window only |
+| Universe refresh | Every Friday ~23:30 IST; GitHub Actions |
 
 ## 16. Validation Status
 
-These are locked inputs, not proof of implementation correctness. Each definition must be independently tested on synthetic data, tested on real NSE data, audited for leakage, and regression-tested before production completion.
+These are locked inputs, not proof of implementation correctness. Each definition must be independently tested on synthetic data, tested on real Nifty Total Market data, audited for leakage, and regression-tested before production completion.
