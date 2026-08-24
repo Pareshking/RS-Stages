@@ -107,3 +107,35 @@ The reference terminal's fifth view is entirely F&O (open interest, basis,
 implied volatility, put/call, max pain). The repository has no derivatives data
 and locked-spec section 2 forbids F&O filtering. The view is omitted. No
 substitute was invented to fill the slot.
+
+### D-2.1.7 — The local sources watcher is disabled in the deployed app
+
+The deployment log carried `KeyError: 'rs_stages'`. Streamlit 1.62's
+`LocalSourcesWatcher` responds to a source change by evicting the watched
+package and every one of its submodules from `sys.modules`, so the next script
+run re-imports them. CPython's `importlib._bootstrap._load` ends with an
+unguarded `module = sys.modules.pop(spec.name)`; an eviction landing between the
+loader's own `sys.modules[spec.name] = module` and that pop raises `KeyError`
+with the bare package name in the importing thread.
+
+This is a race, which is why it surfaced once at boot and the app then served
+normally. It was reproduced deterministically rather than reasoned about: a
+package evicted while another thread executes its body raises `KeyError` with
+that package's name.
+
+`rs_stages` is a PEP 420 namespace package, the case Streamlit's own eviction
+comment identifies as leaving orphaned children in `sys.modules`.
+
+The deployed source cannot change while the process is running — a new commit
+rebuilds the container — so the watcher has nothing to gain. `fileWatcherType`
+is set to `none`, which leaves `_watched_modules` empty, which leaves the
+eviction set empty. The race becomes unreachable rather than merely unlikely.
+
+### D-2.1.8 — Charts render through `st.iframe`
+
+Both charts embedded through `st.components.v1.html`, which Streamlit scheduled
+for removal after 2026-06-01. The app was one dependency upgrade away from
+losing the price chart and the participation trend at the same time, and the
+charts are how Stage and participation are read. `st.iframe` is the supported
+replacement and takes the same self-contained HTML string, so the vendored
+charting library and the dual-axis configuration are unaffected.
