@@ -516,6 +516,7 @@ It has been run four times against four detector designs. All four failed.
 | 2 | fixed 1.5% threshold | `5W 29/4 6T` | `25W 17/6 26T` |
 | 3 | cascading threshold | `10T`, deepest 23 | `44T` |
 | 4 | cascade + structural bounds | no qualifying base | no qualifying base |
+| 5 | recovery gating (synthetic only) | not reached | not reached |
 
 Attempt 2 established that no single threshold can work: a sweep across eleven
 values showed NFLX's deepest leg needs roughly 15% sensitivity while its
@@ -532,12 +533,40 @@ synthetic data but not on real data. Both stocks now yield more than six
 contractions, so the footprint is withheld. This fails safely rather than
 reporting a fabricated count, but it does not read the pattern.
 
+**Attempt 5 and why it stopped before real data.** The first four asked how
+large a reversal must be to count. Attempt 5 asked instead what event *ends* a
+contraction, and answered: price must retrace most of the decline before the
+next one can begin, so counter-rallies inside a decline cannot fragment it. It
+acts on the segmentation rather than filtering its output, which is the flaw
+attempt 4 could not escape.
+
+On a synthetic base built with realistic recoveries and daily noise — the two
+properties the earlier fixtures lacked — it reproduced the built count of three
+at every recovery fraction from 0.70 to 0.90, but only with a 3% noise floor.
+The stability across recovery values is real evidence that the structural rule
+carries the work. The floor is what kills it: the source's tightest reported
+contraction is 2%, and the tightest leg is the one that forms the pivot, so a 3%
+floor makes the pivot invisible by construction. At the 1-2% floors real
+contractions demand, the count fragments to between five and twelve.
+
+That is attempt 2's wall reached from a new direction. It failed on synthetic
+data, so it was never run against MELI and NFLX.
+
+**A correction to this section's earlier reasoning.** The pivot was recorded
+here as the more tractable half of the problem, on the grounds that locating one
+contraction is smaller than counting all of them. That is wrong and the error
+matters. The pivot sits at the top of the *final* contraction, which in this
+pattern is the *tightest* one — nearest the noise floor, where every detector
+built here is weakest. The pivot is not the easy part of the count; it is the
+part most exposed to the failure mode.
+
 **What every attempt got right.** Base duration, deepest correction and tightest
 correction landed within tolerance from attempt 2 onward. It is specifically the
 **contraction count** that has never been reproduced, and the deepest reading
 degrades only as a consequence of miscounting.
 
-**The standing decision.** The contraction count is not published. The elements
+**The standing decision.** The contraction count is not published, and after
+attempt 5 the pivot refinement is not pursued either. The elements
 that do validate — the adaptive 3-to-65-week base, the depth bounds, the pivot
 at the final contraction, the volume rule and the Stage 2 gate — are adopted;
 the count and the `nW d/t nT` footprint that depends on it are not. A number

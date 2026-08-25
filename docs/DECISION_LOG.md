@@ -354,3 +354,41 @@ from code silently; a number cannot, once a test holds both ends. The general
 lesson is the one already recorded in §10.5.2 from a different direction:
 internal consistency is not evidence, and the check has to reach outside the
 artefact being checked.
+
+### D-2.3.2 — Attempt 5 asked the right question and still failed
+
+Attempts 1-4 all asked how large a reversal must be to count as a contraction,
+and answered with a threshold. Attempt 5 asked instead what event *ends* one:
+price must retrace most of the decline before the next can begin, so the
+counter-rallies inside a single decline cannot fragment it. That acts on the
+segmentation itself rather than filtering its output, which is the flaw attempt
+4 could not escape.
+
+It worked, on the part that was ever in doubt. On a synthetic base built with
+realistic recoveries and daily noise — the two properties the earlier fixtures
+lacked — it reproduced the built count of three at every recovery fraction from
+0.70 to 0.90. Stability across the parameter is the evidence that the structural
+rule, not the parameter, is carrying the work.
+
+It needs a 3% floor on what counts as a correction to get there. The source's
+tightest reported contraction is 2%, and the tightest leg is the one that forms
+the pivot, so a 3% floor makes the pivot invisible by construction. At the 1-2%
+floors real contractions demand, the count fragments to between five and twelve.
+That is attempt 2's wall reached from a new direction. It failed on synthetic
+data and was never run against the worked examples.
+
+**A reasoning error worth recording, because it was mine and it was confident.**
+The pivot was argued here to be the more tractable half — locating one
+contraction being a smaller problem than counting all of them. Smaller in scope,
+yes, but the pivot sits at the top of the *final* contraction, which in this
+pattern is the *tightest*: nearest the noise floor, where every detector built
+here is weakest. The pivot is not the easy part of the count. It is the part
+most exposed to the failure mode, and the argument for doing it first had the
+difficulty exactly inverted.
+
+Five attempts is enough. The count and the pivot refinement are both closed.
+`vcp_pivot` continues to publish the base high, which is never below the final
+contraction's high, so `Pct_To_Pivot` overstates the distance and errs toward
+caution. A test asserts the recovery detector stays out of the published pivot,
+and a second pins the failure so a sixth attempt starts from evidence rather
+than from this prose.

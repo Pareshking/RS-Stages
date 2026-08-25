@@ -871,3 +871,106 @@ def cascading_contractions(
         else:
             out.append((stamps[peak_at], float(peak), float(depth)))
     return out
+
+
+# --- v2.3: recovery-gated contractions --------------------------------------
+#
+# Attempts one through four all asked "how large must a reversal be to count?"
+# and answered with a threshold — fixed, then cascading, then bounded. All four
+# over-segmented real bases in the same direction: 26 and 44 contractions where
+# the source reads 3. Over-counting in one direction is not a tuning error, it
+# is the wrong question.
+#
+# Inside a single 27% correction there are dozens of small counter-rallies. A
+# reversal detector sees each as a swing. They are all sub-structure of ONE
+# contraction, because price never climbed back near the prior high in between.
+# What separates one contraction from the next is not the size of a reversal but
+# RECOVERY: price must retrace most of the decline before a new contraction can
+# begin. That is a structural rule about where a contraction ends, and it acts
+# on the segmentation itself rather than filtering its output afterwards — which
+# is why attempt four's structural bounds could only reject a base that had
+# already been shattered into 44 pieces.
+
+#: Fraction of a decline price must retrace before the next contraction starts.
+#: Ours: the source reads contractions by eye and states no such number. Set
+#: from its own description of bases whose rallies recover most of each decline.
+VCP_RECOVERY_FRACTION = 0.70
+
+#: A correction shallower than this is noise, not a contraction. Below the
+#: tightest contraction the source reports, so it cannot hide a real leg.
+VCP_MIN_CONTRACTION_PCT = 1.0
+
+
+def recovery_contractions(
+    high: pd.Series,
+    low: pd.Series,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    recovery: float = VCP_RECOVERY_FRACTION,
+    min_pct: float = VCP_MIN_CONTRACTION_PCT,
+) -> list[tuple[pd.Timestamp, float, float, float]]:
+    """Segment a base into contractions by recovery rather than by sensitivity.
+
+    Returns one tuple per completed contraction: the peak's session, the peak,
+    the trough, and the depth as a percentage of the peak. A contraction is
+    open from its peak until price retraces ``recovery`` of the decline; only
+    then can the next one begin, so counter-rallies inside a decline cannot
+    fragment it.
+    """
+    h = high.sort_index().astype(float)
+    l = low.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    window = (h.index >= pd.Timestamp(start)) & (h.index <= pd.Timestamp(end))
+    h, l = h[window], l[window]
+    if len(h) < 2:
+        return []
+
+    stamps = h.index
+    out: list[tuple[pd.Timestamp, float, float, float]] = []
+    peak, peak_at = float(h.iloc[0]), 0
+    trough = float(l.iloc[0])
+
+    for i in range(1, len(h)):
+        hi, lo = float(h.iloc[i]), float(l.iloc[i])
+        depth = (peak - trough) / peak * 100.0 if peak > 0 else 0.0
+
+        # Still extending the high with no meaningful decline behind it: this is
+        # the same leg reaching further, not a new one.
+        if hi >= peak and depth < min_pct:
+            peak, peak_at, trough = hi, i, lo
+            continue
+
+        if lo < trough:
+            trough = lo
+
+        depth = (peak - trough) / peak * 100.0 if peak > 0 else 0.0
+        if depth < min_pct:
+            continue
+
+        # Price has retraced enough of the decline for this contraction to be
+        # complete. The next one starts here.
+        if hi >= trough + recovery * (peak - trough):
+            out.append((stamps[peak_at], peak, trough, depth))
+            peak, peak_at, trough = hi, i, lo
+
+    return out
+
+
+def final_contraction_pivot(
+    high: pd.Series,
+    low: pd.Series,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[float, float]:
+    """§10.6 — the pivot at the top of the final contraction, and its depth.
+
+    The source places the pivot at the last contraction's high, not the base's.
+    Those differ whenever the base high sits in an early leg. Returns
+    ``(nan, nan)`` when no contraction completes, so the caller withholds the
+    reading rather than substituting the base high.
+    """
+    legs = recovery_contractions(high, low, start, end)
+    if not legs:
+        return float("nan"), float("nan")
+    _, peak, _, depth = legs[-1]
+    return float(peak), float(depth)
