@@ -516,3 +516,54 @@ def test_the_footprint_reports_the_final_contraction_as_the_pivot():
 def test_a_base_outside_three_to_sixty_five_weeks_is_not_a_vcp():
     high, low = _base_with_depths([30.0, 12.0, 5.0], bars_per_leg=1)
     assert not pd.notna(quant.vcp_footprint(high, low, END)["Base_Weeks"])
+
+
+def test_a_deeper_contraction_restarts_the_sequence():
+    """§10.5.1 — contractions shrink; a deeper one is a new base, not a step.
+
+    Without this the cascade degenerated: its threshold ratchets down after each
+    contraction and never recovers, so late in a noisy base it behaved exactly
+    like the fine fixed threshold it replaced. It read 44 contractions off NFLX
+    against the source's 3. Enforcing the structure the source describes fixed
+    what three rounds of parameter tuning could not.
+    """
+    # Shrinking, then a deeper correction, then shrinking again: only the final
+    # decreasing run belongs to the base that is forming now.
+    high, low = _base_with_depths([20.0, 9.0, 30.0, 12.0, 5.0])
+    got = [d for _, _, d in quant.cascading_contractions(high, low, END)]
+    assert len(got) == 3, [round(g) for g in got]
+    assert got[0] == pytest.approx(30.0, abs=1.5)
+
+
+def test_noise_no_longer_degenerates_the_cascade():
+    """The failure mode that made attempt three worse than attempt two."""
+    high, low = _base_with_depths([27.0, 14.0, 7.0], noise_pct=1.6)
+    got = quant.cascading_contractions(high, low, END)
+    assert len(got) <= quant.VCP_MAX_CONTRACTIONS, len(got)
+
+
+def test_more_contractions_than_the_source_allows_is_not_a_vcp():
+    """Forty-four contractions is not a bad reading; it is an absence."""
+    assert quant.VCP_MAX_CONTRACTIONS == 6
+    # A path with no shrinking structure at all should not yield a footprint.
+    idx = pd.bdate_range(end=END, periods=300)
+    rng = np.random.default_rng(3)
+    walk = pd.Series(100 * np.exp(rng.normal(0, 0.02, 300).cumsum()), index=idx)
+    fp = quant.vcp_footprint(walk * 1.005, walk * 0.995, END)
+    if pd.notna(fp["Base_Weeks"]):
+        assert fp["Contractions"] <= quant.VCP_MAX_CONTRACTIONS
+
+
+def test_vcp_footprint_honours_the_parameters_it_accepts():
+    """It accepted a threshold and silently ignored it, which made a sweep lie.
+
+    Eleven sweep rows came back identical because the parameter never reached
+    the detector. A signature that accepts a knob it does not use produces
+    confident, meaningless output.
+    """
+    high, low = _base_with_depths([30.0, 12.0, 5.0])
+    loose = quant.vcp_footprint(high, low, END, ratio=0.25)
+    tight = quant.vcp_footprint(high, low, END, ratio=0.9)
+    assert loose["Contractions"] != tight["Contractions"], (
+        "changing the cascade ratio must change the reading"
+    )

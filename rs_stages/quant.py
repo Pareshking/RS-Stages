@@ -266,6 +266,11 @@ VCP_CONTRACTION_RATIO_MAX = 0.60
 VCP_VOLUME_DRYUP_MAX = 0.80
 VCP_MIN_CONTRACTIONS = 2
 
+#: §10.5.1 — the source puts a VCP at two to six contractions. This is not a
+#: display cap: a base yielding more than six has not been read badly, it is not
+#: the pattern. Enforcing it is a structural claim, not a tuned parameter.
+VCP_MAX_CONTRACTIONS = 6
+
 #: §10.5.1 — depth bounds, from the source. It states that most constructive
 #: setups correct between 10% and 35%, and that a stock down 60% or more is
 #: rarely worth buying because the overhead supply above it is punishing. The
@@ -699,6 +704,17 @@ def contraction_depths(
     return out
 
 
+#: §10.5.1 — cascade parameters. The source describes each contraction as
+#: roughly half the previous, so the sensitivity used to find contraction i+1 is
+#: derived from the depth of contraction i rather than fixed. A sweep against
+#: two of the source's own footprints showed no single fixed threshold can work:
+#: NFLX's deepest leg (27%) needs ~15% sensitivity while its tightest (7%) needs
+#: ~8% or finer, and the contraction count needs something in between.
+CASCADE_INITIAL_PCT = 15.0
+CASCADE_RATIO = 0.25
+CASCADE_FLOOR_PCT = 1.5
+
+
 #: §10.5.1 — the base runs 3 to 65 weeks. Outside that the structure is not a
 #: VCP: too short has not digested supply, too long has stopped being a pause.
 VCP_MIN_BASE_WEEKS = 3
@@ -709,7 +725,8 @@ def vcp_footprint(
     high: pd.Series,
     low: pd.Series,
     end: pd.Timestamp,
-    threshold_pct: float = SWING_REVERSAL_PCT,
+    initial_pct: float = CASCADE_INITIAL_PCT,
+    ratio: float = CASCADE_RATIO,
 ) -> dict:
     """§10.5.1 — the base's technical footprint, in the source's own terms.
 
@@ -741,8 +758,10 @@ def vcp_footprint(
     if len(h) < 2:
         return dict(absent)
 
-    found = cascading_contractions(h, l, stop)
-    if not found:
+    found = cascading_contractions(
+        h, l, stop, initial_pct=initial_pct, ratio=ratio
+    )
+    if not found or len(found) > VCP_MAX_CONTRACTIONS:
         return dict(absent)
 
     base_start = found[0][0]
@@ -770,17 +789,6 @@ def footprint_label(fp: dict) -> str:
     if any(v is None for v in (weeks, deep, tight)):
         return "—"
     return f"{round(weeks)}W {round(deep)}/{round(tight)} {int(fp['Contractions'])}T"
-
-
-#: §10.5.1 — cascade parameters. The source describes each contraction as
-#: roughly half the previous, so the sensitivity used to find contraction i+1 is
-#: derived from the depth of contraction i rather than fixed. A sweep against
-#: two of the source's own footprints showed no single fixed threshold can work:
-#: NFLX's deepest leg (27%) needs ~15% sensitivity while its tightest (7%) needs
-#: ~8% or finer, and the contraction count needs something in between.
-CASCADE_INITIAL_PCT = 15.0
-CASCADE_RATIO = 0.25
-CASCADE_FLOOR_PCT = 1.5
 
 
 def cascading_contractions(
@@ -836,7 +844,14 @@ def cascading_contractions(
                 trough = lows[j]
             if peak > 0 and highs[j] >= trough * (1 + threshold / 100.0):
                 depth = (peak - trough) / peak * 100.0
-                out.append((stamps[peak_at], float(peak), float(depth)))
+                # The pattern is defined by contractions that shrink. A deeper
+                # correction than the one before it is not a continuation of
+                # this base — it is a new, deeper base beginning, so the
+                # sequence restarts there rather than accumulating.
+                if out and depth >= out[-1][2]:
+                    out = [(stamps[peak_at], float(peak), float(depth))]
+                else:
+                    out.append((stamps[peak_at], float(peak), float(depth)))
                 threshold = max(floor_pct, depth * ratio)
                 seeking_trough = False
                 peak, peak_at = highs[j], j
@@ -850,5 +865,9 @@ def cascading_contractions(
     # The contraction in progress at T is the one that forms the pivot, so it is
     # reported rather than withheld until it resolves.
     if seeking_trough and peak > trough > 0:
-        out.append((stamps[peak_at], float(peak), float((peak - trough) / peak * 100.0)))
+        depth = (peak - trough) / peak * 100.0
+        if out and depth >= out[-1][2]:
+            out = [(stamps[peak_at], float(peak), float(depth))]
+        else:
+            out.append((stamps[peak_at], float(peak), float(depth)))
     return out
