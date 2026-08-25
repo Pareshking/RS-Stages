@@ -600,3 +600,100 @@ def stage1_readiness(
         np.isfinite(close) and np.isfinite(ma_10w) and close > ma_10w,
     )
     return int(sum(bool(c) for c in checks))
+
+
+# --- v2.3: swing detection and the technical footprint ----------------------
+#
+# §10.5.1 replaces §10.5's fixed-block detector with the source's own
+# definitions. Contractions are peak-to-trough pullbacks, which means the code
+# must first decide what counts as a swing rather than noise.
+
+#: The one number in §10.5.1 that is ours. The source reads swings by eye and
+#: never states a reversal threshold. Its tightest worked contraction is 2%, so
+#: the threshold has to sit below that or the final contraction — the one that
+#: forms the pivot — becomes invisible.
+SWING_REVERSAL_PCT = 1.5
+
+
+def swing_points(
+    high: pd.Series, low: pd.Series, threshold_pct: float = SWING_REVERSAL_PCT
+) -> list[tuple[pd.Timestamp, float, str]]:
+    """Alternating swing highs and lows, by percentage reversal.
+
+    A running extreme is carried forward until price reverses against it by
+    ``threshold_pct``; at that point the extreme is confirmed as a swing and the
+    direction flips. Peaks are taken from High and troughs from Low, because a
+    contraction is measured peak to trough and both live intraday.
+
+    Returned as ``(timestamp, price, kind)`` with ``kind`` in ``{"H", "L"}``,
+    strictly alternating. The final running extreme is included as a
+    provisional swing: the rightmost contraction is the one that forms the
+    pivot, so excluding it until it reverses would hide precisely the structure
+    the pattern exists to find.
+    """
+    h = high.sort_index().astype(float)
+    l = low.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    frame = pd.DataFrame({"h": h, "l": l}).dropna()
+    if len(frame) < 2:
+        return []
+
+    factor = threshold_pct / 100.0
+    stamps = list(frame.index)
+    highs = frame["h"].to_numpy()
+    lows = frame["l"].to_numpy()
+
+    # Direction is unknown at the first bar. Carry both candidate extremes until
+    # one of them is broken by the threshold; guessing instead would plant a
+    # spurious swing at the left edge of every series.
+    direction: str | None = None
+    hi_price, hi_at = highs[0], 0
+    lo_price, lo_at = lows[0], 0
+    out: list[tuple[pd.Timestamp, float, str]] = []
+
+    for i in range(1, len(frame)):
+        if direction is None:
+            hi_price, hi_at = (highs[i], i) if highs[i] > hi_price else (hi_price, hi_at)
+            lo_price, lo_at = (lows[i], i) if lows[i] < lo_price else (lo_price, lo_at)
+            if lows[i] <= hi_price * (1 - factor):
+                out.append((stamps[hi_at], float(hi_price), "H"))
+                direction, lo_price, lo_at = "down", lows[i], i
+            elif highs[i] >= lo_price * (1 + factor):
+                out.append((stamps[lo_at], float(lo_price), "L"))
+                direction, hi_price, hi_at = "up", highs[i], i
+            continue
+
+        if direction == "up":
+            if highs[i] > hi_price:
+                hi_price, hi_at = highs[i], i
+            elif lows[i] <= hi_price * (1 - factor):
+                out.append((stamps[hi_at], float(hi_price), "H"))
+                direction, lo_price, lo_at = "down", lows[i], i
+        else:
+            if lows[i] < lo_price:
+                lo_price, lo_at = lows[i], i
+            elif highs[i] >= lo_price * (1 + factor):
+                out.append((stamps[lo_at], float(lo_price), "L"))
+                direction, hi_price, hi_at = "up", highs[i], i
+
+    if direction == "up":
+        out.append((stamps[hi_at], float(hi_price), "H"))
+    elif direction == "down":
+        out.append((stamps[lo_at], float(lo_price), "L"))
+    return out
+
+
+def contraction_depths(
+    swings: list[tuple[pd.Timestamp, float, str]]
+) -> list[tuple[pd.Timestamp, float]]:
+    """§10.5.1 — peak-to-trough depth of each contraction, oldest first.
+
+    A contraction is a swing high followed by a swing low. Returned as
+    ``(swing-high timestamp, depth percent)`` so a caller can locate the
+    contraction that formed the pivot, not merely count how many there were.
+    """
+    out: list[tuple[pd.Timestamp, float]] = []
+    for (stamp, peak, kind), (_, trough, next_kind) in zip(swings, swings[1:]):
+        if kind == "H" and next_kind == "L" and peak > 0:
+            out.append((stamp, (peak - trough) / peak * 100.0))
+    return out

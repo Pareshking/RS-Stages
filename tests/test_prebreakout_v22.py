@@ -337,3 +337,84 @@ def test_stage1_readiness_counts_only_what_is_satisfied():
     assert quant.stage1_readiness(
         float("nan"), 70.0, float("nan"), 0.7, 110.0, 100.0
     ) == 3
+
+
+# --- v2.3 swing detection ----------------------------------------------------
+#
+# These build a base whose contractions are known by construction and check the
+# detector recovers them. That is a real gate on the arithmetic and on swing
+# identification, but it is NOT validation against the source's charts: the
+# worked examples are US stocks from 1995-2009 whose price history this project
+# has no access to. A detector can pass every test here and still disagree with
+# how the source read an actual chart.
+
+def _base_with_depths(depths, bars_per_leg=9, start=100.0):
+    """A price path whose peak-to-trough contractions are exactly `depths`."""
+    points = [(start, True)]
+    peak = start
+    for depth in depths:
+        trough = peak * (1 - depth / 100.0)
+        points.append((trough, False))
+        peak = trough * 1.06
+        points.append((peak, True))
+    points = points[:-1]
+
+    prices = []
+    for (a, _), (b, _) in zip(points, points[1:]):
+        prices += list(np.linspace(a, b, bars_per_leg, endpoint=False))
+    prices.append(points[-1][0])
+    idx = pd.bdate_range(end=END, periods=len(prices))
+    path = pd.Series(prices, index=idx)
+    return path * 1.0005, path * 0.9995
+
+
+@pytest.mark.parametrize(
+    "label,depths",
+    [
+        ("VIVO 31/17/8/3", [31.0, 17.0, 8.0, 3.0]),
+        ("KCP 32/14/7/3", [32.0, 14.0, 7.0, 3.0]),
+        ("New Oriental 22/8/2", [22.0, 8.0, 2.0]),
+        ("FSII 18/5", [18.0, 5.0]),
+    ],
+)
+def test_the_zigzag_recovers_a_contraction_sequence_it_was_built_from(label, depths):
+    high, low = _base_with_depths(depths)
+    recovered = [d for _, d in quant.contraction_depths(quant.swing_points(high, low))]
+    assert len(recovered) == len(depths), f"{label}: found {recovered}"
+    for got, want in zip(recovered, depths):
+        # The High/Low straddle in the fixture shifts each depth ~0.1pp.
+        assert got == pytest.approx(want, abs=0.5), f"{label}: {recovered} vs {depths}"
+
+
+def test_the_final_contraction_is_reported_before_it_reverses():
+    """The rightmost contraction forms the pivot, so it cannot wait for a flip.
+
+    A zigzag that only emits confirmed swings would hide the tightest
+    contraction — the one the pattern exists to find — until after the breakout.
+    """
+    high, low = _base_with_depths([20.0, 10.0, 4.0])
+    depths = quant.contraction_depths(quant.swing_points(high, low))
+    assert len(depths) == 3
+    assert depths[-1][1] == pytest.approx(4.0, abs=0.5)
+
+
+def test_noise_below_the_threshold_creates_no_swings():
+    """§10.5.1's threshold exists to separate a pullback from jitter."""
+    idx = pd.bdate_range(end=END, periods=120)
+    rng = np.random.default_rng(4)
+    flat = pd.Series(100 + rng.normal(0, 0.25, 120), index=idx)   # ~0.25% jitter
+    assert len(quant.swing_points(flat * 1.001, flat * 0.999)) <= 2
+
+
+def test_the_threshold_sits_below_the_tightest_contraction_in_the_source():
+    """A 2% final contraction must remain visible, or the pivot is lost."""
+    assert quant.SWING_REVERSAL_PCT < 2.0
+    high, low = _base_with_depths([18.0, 6.0, 2.0])
+    depths = [d for _, d in quant.contraction_depths(quant.swing_points(high, low))]
+    assert len(depths) == 3, f"a 2% contraction went missing: {depths}"
+
+
+def test_swings_strictly_alternate():
+    high, low = _base_with_depths([25.0, 12.0, 5.0])
+    kinds = [k for _, _, k in quant.swing_points(high, low)]
+    assert all(a != b for a, b in zip(kinds, kinds[1:])), kinds
