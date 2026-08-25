@@ -52,6 +52,42 @@ def fetch(symbol: str, month: str) -> pd.DataFrame:
     return normalize_session_index(frame)
 
 
+#: Thresholds to sweep. A fixed 1.5% shattered a 27% decline into fragments on
+#: real data, so the question is whether ANY fixed value reproduces the source's
+#: counts, or whether the sensitivity has to tighten across the base as the
+#: contractions themselves do.
+SWEEP = [1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]
+
+
+def sweep(symbol: str, month: str, want: dict, data: pd.DataFrame) -> None:
+    """Report the footprint each threshold produces, to locate the structure."""
+    sessions = [d for d in data.index if str(d)[:7] == month]
+    label = f"{want['weeks']}W {want['deepest']}/{want['tightest']} {want['contractions']}T"
+    print(f"  sweep against source {label}:")
+    print(f"    {'thr':>5}  {'best session':>12}  {'footprint':>18}  {'wk':>5} {'deep':>6} {'tight':>6} {'T':>4}")
+    for thr in SWEEP:
+        best, best_score = None, None
+        for t in sessions:
+            fp = vcp_footprint(data["High"], data["Low"], t, thr)
+            if not pd.notna(fp["Base_Weeks"]):
+                continue
+            score = abs(fp["Contractions"] - want["contractions"]) * 3 + abs(
+                fp["Deepest_Pct"] - want["deepest"]
+            )
+            if best_score is None or score < best_score:
+                best, best_score = (t, fp), score
+        if best is None:
+            print(f"    {thr:5.1f}  {'(no base)':>12}")
+            continue
+        t, fp = best
+        mark = " <-" if fp["Contractions"] == want["contractions"] else ""
+        print(
+            f"    {thr:5.1f}  {str(t.date()):>12}  {footprint_label(fp):>18}  "
+            f"{fp['Base_Weeks']:5.1f} {fp['Deepest_Pct']:6.1f} {fp['Tightest_Pct']:6.1f} "
+            f"{fp['Contractions']:4d}{mark}"
+        )
+
+
 def main() -> None:
     failures: list[str] = []
     for symbol, (month, want) in CASES.items():
@@ -66,6 +102,8 @@ def main() -> None:
 
         sessions = [d for d in data.index if str(d)[:7] == month]
         print(f"  {len(data)} sessions fetched; scanning {len(sessions)} in {month}")
+        sweep(symbol, month, want, data)
+        print()
 
         best, best_score = None, None
         for t in sessions:
