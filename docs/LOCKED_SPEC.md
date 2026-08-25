@@ -366,6 +366,133 @@ instruments and neither replaces the other.
 unavailable, `VCP_Setup` included; it is never computed from High and Close
 alone.
 
+## 10.5.1 Volatility contraction, from the source — NEW v2.3
+
+§10.5 above was written before the source text was available. Its detector was
+an RS-Stages construction: five fixed ten-session blocks, compared by their
+high-low range. The source specifies something different, and specifies it
+precisely enough that almost none of the invention is needed. This section
+supersedes §10.5's detector. §10.5's reasoning about *why* contraction matters
+stands; its arithmetic does not.
+
+### The base
+
+The base begins at the absolute high the stock comes off and runs to T. Its
+duration is **3 to 65 weeks**; outside that range the structure is not a VCP.
+
+This replaces the fixed 50-session window, which was the single most damaging
+choice in §10.5: of the six worked examples the source gives, five have bases
+the old window cannot represent at all.
+
+### Contractions
+
+A contraction is a peak-to-trough decline measured from a swing high to the
+following swing low:
+
+```
+Depth(i) = (SwingHigh(i) - SwingLow(i)) / SwingHigh(i) * 100
+```
+
+- Count: **2 to 6**, typically 2 to 4.
+- Depths contract from left to right — this is the pattern's defining property.
+- The deepest correction is **10% to 35%** in a constructive base.
+- A deepest correction of **60% or more is rejected**: the source states such
+  structures are prone to failure, and the overhead supply argument in §10.5
+  explains why.
+
+Note this measures *pullback depth*, not the range of a fixed window. The two
+coincide only by accident.
+
+### The technical footprint
+
+The source publishes a base as three measurements, and so do we:
+
+```
+Base_Weeks      how long the base has been forming
+Deepest_Pct     the largest correction anywhere in the base
+Tightest_Pct    the narrowest pullback, at the far right of the base
+Contractions    how many contractions (the source writes these as "T"s)
+```
+
+Rendered in the source's own shorthand: `40W 31/3 4T`.
+
+### The pivot
+
+Two cases, and the distinction is the source's:
+
+1. **A base with real contractions** — the pivot is the high of the **final,
+   narrowest** contraction. Not the high of the base.
+2. **A flat base with no real contraction** — the pivot is the high of the base,
+   and only when that base corrected no more than 10–15%.
+
+Case 2 is what §10.6 currently implements for every base, which is why it is
+right for flat bases and wrong for every VCP.
+
+The pivot **may sit below the 52-week high** — the source names cup-with-handle
+and cup-completion-cheat structures whose pivots form below the overall high.
+It is therefore never gated on proximity to a new high.
+
+### Volume
+
+On the final contraction: average volume **below the 50-day average**, with at
+least one session at or near the lowest volume in the entire base.
+
+This supersedes `Volume_DryUp`'s comparison of the last ten sessions against the
+prior fifty. That construction was ours and its 0.80 threshold was invented; the
+rule above is the source's, and it is anchored to the final contraction rather
+than to a fixed recent window.
+
+### The one parameter that remains ours
+
+Measuring pullbacks requires deciding what counts as a swing rather than noise.
+The source reads this by eye and never states a threshold. The tightest
+contraction in its worked examples is 2%, so the threshold must sit below that:
+**1.5%** is used. This is the only invented number left in the section, against
+a detector that was previously invented end to end.
+
+### Acceptance criteria
+
+The detector is not finished until it reproduces the source's own footprints:
+
+| Stock | Footprint | Contractions |
+| --- | --- | --- |
+| MELI | `6W 32/6 3T` | 32 → … → 6 |
+| New Oriental | `8W 22/2 3T` | 22 → 8 → 2 |
+| FSII | `10W 18/5` | 18 → 5 |
+| NFLX | `27W 27/7 3T` | 27 → … → 7 |
+| VIVO | `40W 31/3 4T` | 31 → 17 → 8 → 3 |
+| KCP | 4T | 32 → 14 → 7 → 3 |
+
+These are acceptance tests against the source's own charts, not against our
+universe. A detector that satisfies our data but not these is measuring
+something else.
+
+### Out of scope
+
+Three further setups in the source are separate patterns, each with its own
+entry criteria, and none is implemented or approximated here. All three are
+recorded so a later revision can pick them up deliberately rather than
+rediscovering them:
+
+- **Power play / high tight flag** — a 100%+ advance in under eight weeks on
+  heavy volume, then a sideways range correcting no more than 20–25% over three
+  to six weeks, with volume contracting sharply just before the breakout. The
+  source requires VCP characteristics *within* it, so it composes with §10.5.1
+  rather than replacing it.
+- **Primary base** — the first buyable base after an IPO: at least three to five
+  weeks, correcting no more than 25–35%; a three-week consolidation should not
+  correct more than 25%, while a base lasting around a year may decline as much
+  as 50% and still be sound.
+- **Cup-completion-cheat (3C) and cup-with-handle** — separate patterns with
+  their own parameters — a 3 to 45 week formation, a cheat plateau contained
+within 5–10%, a handle in the upper third of the cup, and a prior advance of
+25–100% or more over the preceding 3 to 36 months. They are not implemented and
+are not approximated by the VCP detector.
+
+Post-entry management — squats, reversal recoveries, holding the 20-day average,
+tennis-ball action — is position management, not screening, and is out of scope
+for this specification entirely.
+
 ## 10.6 The pivot — NEW v2.2
 
 The buy point at the top of the base, and the distance still to travel.
