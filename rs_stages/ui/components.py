@@ -399,6 +399,7 @@ SCREENER_COLUMNS = {
     "range": ("52W range", "left", True),
     "r3m": ("3M", "right", True),
     # --- v2.2 pre-breakout structure ---
+    "evidence": ("Evidence", "left", False),
     "rsline": ("RS line", "left", False),
     "contraction": ("Contraction", "right", True),
     "dryup": ("Vol dry-up", "right", True),
@@ -412,8 +413,17 @@ SCREENER_COLUMNS = {
 #: Stage 1 stock the same label, so showing it beside a readiness ranking would
 #: imply the label were varying with the score. It is not.
 SETUP_COLUMNS = (
-    "symbol", "trend", "rs", "stage",
+    "symbol", "evidence", "trend", "rs", "stage",
     "rsline", "contraction", "dryup", "pivot", "readiness",
+)
+
+#: The four published pre-breakout conditions, in the order the Setups view
+#: lists them. Evidence is how many a stock satisfies at once.
+SETUP_CONDITIONS = (
+    ("Trend template", "Trend_Template_Pass"),
+    ("RS leading price", "RS_Line_NH_Before_Price"),
+    ("Contracting base", "VCP_Setup"),
+    ("Stage 1 ready", "Stage1_Readiness"),
 )
 
 
@@ -488,6 +498,24 @@ def _cell(key: str, row: pd.Series, trend: Sequence[float] | None) -> str:
             return f'<span style="color:var(--faint)">{DASH}</span>'
         color = POSITIVE if value == 8 else ("var(--ink)" if value >= 6 else "var(--sub)")
         return f'<span class="num" style="color:{color};font-weight:600">{int(value)}/8</span>'
+    if key == "evidence":
+        value = to_float(row.get("Setup_Evidence"))
+        if math.isnan(value):
+            return f'<span style="color:var(--faint)">{DASH}</span>'
+        filled = int(value)
+        # Bars rather than the readiness dots: both are counts and they sit in
+        # the same row, so they must not be mistaken for one another.
+        bars = "".join(
+            f'<span style="display:inline-block;width:4px;height:12px;margin-right:2px;'
+            f'border-radius:1px;background:{POSITIVE if i < filled else "var(--line)"}"></span>'
+            for i in range(len(SETUP_CONDITIONS))
+        )
+        color = POSITIVE if filled >= 2 else "var(--sub)"
+        return (
+            f'<span class="num" style="font-weight:600;color:{color}" '
+            f'title="{filled} of {len(SETUP_CONDITIONS)} setup conditions met">'
+            f'{bars} {filled}</span>'
+        )
     if key == "readiness":
         value = to_float(row.get("Stage1_Readiness"))
         if math.isnan(value):

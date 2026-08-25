@@ -1433,11 +1433,13 @@ def page_methodology() -> None:
 #: happened"; this one answers "what is coiling". They are different questions
 #: and the evidence columns differ accordingly.
 SETUP_SORTS = {
+    "Evidence (most first)": ("Setup_Evidence", False),
     "Readiness (best first)": ("Stage1_Readiness", False),
     "Closest to pivot": ("Pct_To_Pivot", True),
     "Tightest contraction": ("Contraction_Ratio", True),
     "Driest volume": ("Volume_DryUp", True),
     "RS (high to low)": ("RS_Score", False),
+    "Template score": ("Trend_Template_Score", False),
 }
 
 
@@ -1455,10 +1457,29 @@ def page_setups() -> None:
     view = DATA.copy()
     total_universe = len(view)
 
+    # How many of the four published conditions a stock satisfies at once.
+    # Composed from fields already in the snapshot — this introduces no new
+    # rule, in the same way the Screener presets do not. The sections are not
+    # alternatives to choose between: they sit at different distances from the
+    # same move, so a name meeting several is carrying more evidence than a
+    # name meeting one, and that was invisible while each section was its own
+    # separate list.
+    def _met(frame: pd.DataFrame, field: str) -> pd.Series:
+        if field not in frame.columns:
+            return pd.Series(False, index=frame.index)
+        if field == "Stage1_Readiness":
+            return pd.to_numeric(frame[field], errors="coerce") >= 4
+        return frame[field].fillna(False).astype(bool)
+
+    view["Setup_Evidence"] = sum(
+        _met(view, field).astype(int) for _, field in ui.SETUP_CONDITIONS
+    )
+
     groups = st.segmented_control(
         "Setup",
-        ["RS leading price", "Contracting base", "Stage 1 ready", "All"],
-        default="RS leading price",
+        ["Trend template", "RS leading price", "Contracting base", "Stage 1 ready",
+         "Stacked (2+)", "All"],
+        default="Trend template",
         key="setups_group",
     )
     row = st.columns([2, 2, 2])
@@ -1472,6 +1493,15 @@ def page_setups() -> None:
     )
 
     explain = {
+        "Trend template": (
+            "All eight of Minervini's trend-template criteria satisfied: price above the "
+            "150- and 200-session averages, those averages correctly stacked and the 200 "
+            "rising, price above the 50-session average, well off the 52-week low, near the "
+            "52-week high, and RS 70 or better. Three of the eight thresholds are the "
+            "source's stated values for a different market and era — they are provisional "
+            "here and have not been validated against NSE history.",
+            lambda f: f[f["Trend_Template_Pass"].fillna(False).astype(bool)],
+        ),
         "RS leading price": (
             "Relative strength at a 52-week high while price is at least 5% below its own. "
             "O'Neil's leading tell: the stock is outperforming from inside its base.",
@@ -1489,12 +1519,19 @@ def page_setups() -> None:
             "10-week line has been reclaimed.",
             lambda f: f[pd.to_numeric(f["Stage1_Readiness"], errors="coerce") >= 4],
         ),
+        "Stacked (2+)": (
+            "Names satisfying two or more of the four conditions at once. The sections above "
+            "are the same move seen at different distances — earliest and least certain "
+            "through to latest and most confirmed — so a stock appearing in several is "
+            "carrying more evidence than one appearing in a single list.",
+            lambda f: f[f["Setup_Evidence"] >= 2],
+        ),
         "All": (
             "The whole validated universe with the pre-breakout evidence columns, unfiltered.",
             lambda f: f,
         ),
     }
-    label = groups if groups in explain else "RS leading price"
+    label = groups if groups in explain else "Trend template"
     description, predicate = explain[label]
 
     if liquid_only and "Liquid_UI_Filter" in view.columns:

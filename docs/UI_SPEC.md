@@ -104,8 +104,27 @@ Each section is one published condition, named for its source and section:
    still meaningfully below its own (§4.1). The ordering is the signal.
 3. **Coiling** — contracting range on drying volume within a Stage 2 base
    (§10.5).
-4. **Stage 1 readiness** — a count in [0, 4] over basing names, surfacing the
-   ones furthest along before a Stage 2 transition is confirmed.
+4. **Stage 1 readiness** — a count in [0, 5] over basing names, surfacing the
+   ones furthest along before a Stage 2 transition is confirmed. The section
+   selects 4 or better.
+
+### The sections are evidence to combine, not a menu to choose from
+
+Read in the order above they are one move at four distances: earliest and least
+certain (a base that has merely stopped falling) through to latest and most
+confirmed (a trend already established). None is better than another, and the
+view must not imply a ranking between them.
+
+What does rank is how many a name satisfies at once. Every row therefore carries
+an **evidence count** over the four conditions, a **Stacked (2+)** section
+selects the names carrying more than one, and evidence is the default sort.
+Without it each condition is a separate list and the reader has no way to see
+that a name appears on several — which is the one thing the four lists jointly
+know and none of them can say alone.
+
+The count is composed from published fields and introduces no new rule, exactly
+as the Screener presets do. It is presentation, not a published field: it never
+enters the snapshot and no Action reads it.
 
 ### Screener presets
 
