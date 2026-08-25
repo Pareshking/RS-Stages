@@ -84,4 +84,9 @@ The Action is an interpretation layer. It never replaces or hides the underlying
 
 - Stage structure and 30-week MA concept: Stan Weinstein.
 - RS leadership and breakout principles: William O'Neil.
+- Trend template and the volatility-contraction pattern: Mark Minervini (v2.2).
+  The template's criteria are numeric in the source and implemented verbatim;
+  the contraction detector is an RS-Stages operationalization of a pattern the
+  source describes by example, and is labelled as ours wherever it appears. No
+  Action label reads any Minervini-derived field.
 - The combined nine-label mechanical action mapping is a project specification adopted from the supplied guide; it is not represented as a verbatim rule from either book.

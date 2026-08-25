@@ -135,3 +135,46 @@ def test_unavailable_values_render_as_a_dash_not_a_zero():
 def test_infinite_ud_is_shown_as_infinity_not_a_crash():
     rows = {r.signal: r for r in signal_rows(_row(U_D=float("inf")))}
     assert rows["U/D ratio"].value == "∞"
+
+
+def test_every_source_the_spec_claims_is_actually_cited():
+    """§1 lists three authorities; the Stock page must be able to cite all three.
+
+    Weinstein and O'Neil were cited from the start. v2.2 added Minervini to the
+    authority hierarchy and 25 fields derived from him, but the per-stock source
+    line never mentioned him — a stock could show contraction evidence while
+    attributing the reading to two authors who never described it.
+    """
+    row = {
+        "Stage": "Stage 1 — Basing",
+        "RS_Score": 62.0,
+        "VCP_Setup": True,
+        "Trend_Template_Pass": True,
+        "RS_Line_NH_Before_Price": True,
+    }
+    line = source_line(row)
+    assert "Weinstein" in line
+    assert "O'Neil" in line
+    assert "Minervini" in line
+    # The template's thresholds are transcribed, and the card must say so.
+    assert "provisional" in line
+
+
+def test_a_pre_v22_row_cites_only_what_it_carries():
+    """Attribution follows the evidence, never the other way round."""
+    row = {
+        "Stage": "Stage 2 — Advancing",
+        "RS_Score": 88.0,
+        "Breakout_Confirmed": True,
+    }
+    line = source_line(row)
+    assert "Weinstein" in line and "O'Neil" in line
+    assert "Minervini" not in line, "must not claim a reading the snapshot lacks"
+
+
+def test_contraction_evidence_alone_does_not_claim_the_template():
+    """The two Minervini citations are separate claims and must stay separate."""
+    row = {"Stage": "Stage 1 — Basing", "RS_Score": 55.0, "VCP_Setup": True}
+    line = source_line(row)
+    assert "contracting range" in line
+    assert "trend-template" not in line

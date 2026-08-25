@@ -212,6 +212,22 @@ def source_line(row: Any) -> str:
         )
     if bool(row.get("Breakout_Confirmed")):
         parts.append("Weinstein: breakout confirmed by volume")
+
+    # v2.2 sources. Guarded on the evidence actually being present, so a
+    # snapshot published before v2.2 simply cites the two earlier authors
+    # rather than claiming a reading it does not carry.
+    if bool(row.get("RS_Line_NH_Before_Price")):
+        parts.append(
+            "O'Neil: the relative-strength line turning up before price is the leading tell"
+        )
+    if bool(row.get("VCP_Setup")):
+        parts.append(
+            "Minervini: a contracting range on drying volume is the base tightening before a move"
+        )
+    if bool(row.get("Trend_Template_Pass")):
+        parts.append(
+            "Minervini: all eight trend-template criteria met (thresholds provisional)"
+        )
     return " · ".join(parts)
 
 

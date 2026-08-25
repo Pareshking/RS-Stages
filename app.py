@@ -1392,7 +1392,11 @@ def page_methodology() -> None:
         (
             "Attribution and limits",
             "Stage structure and the 30-week average follow Stan Weinstein; relative-strength "
-            "leadership and breakout principles follow William O'Neil. The nine-label mechanical "
+            "leadership and breakout principles follow William O'Neil; the trend template and the "
+            "volatility-contraction pattern added in v2.2 follow Mark Minervini, whose numeric "
+            "criteria are implemented verbatim while the contraction detector is ours, and whose "
+            "template thresholds remain provisional pending verification against the source text. "
+            "No Action label reads any v2.2 field. The nine-label mechanical "
             "mapping is this project's specification adopted from the supplied NSE Signal "
             "Interpretation Guide, not a verbatim rule from either book. The visual system and layout "
             "follow the WealthStar reference terminal as a design source. Prices are end-of-day from "
