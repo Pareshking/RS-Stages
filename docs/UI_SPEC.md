@@ -36,15 +36,16 @@ There is no F&O/Positioning tab: the repository has no derivatives data and `doc
 
 ## Navigation
 
-Seven views, driven by a pill navigation and addressable by query parameter (`?view=Screener&industry=Banks`, `?view=Stock&symbol=TCS`) so every row, chip and industry name is a working link into the relevant view.
+Eight views, driven by a pill navigation and addressable by query parameter (`?view=Screener&industry=Banks`, `?view=Stock&symbol=TCS`) so every row, chip and industry name is a working link into the relevant view.
 
 1. **Dashboard** — the briefing: regime, stage breadth, Action distribution, leading industries, what changed since the previous completed session, and where names sit today. Briefing and Screener are separate views; the briefing belongs to the Dashboard.
-2. **Screener** — the full validated universe as a dense sortable table, with Industry, Stage, RS, setup evidence and Action as the final decision column. Filters for search, Industry, Stage, Action, RS band and liquidity; paginated.
-3. **Industries** — ranked industry leadership by median RS, with participation share and median 3-month return. Industry is the NSE constituent field, never remapped.
-4. **Market** — participation: regime band, share above the 30-week and 10-week lines, 52-week-high proximity, stage posture, and the participation trend from the published breadth history.
-5. **Movers** — day-over-day structural transitions between the current and previous published snapshots, plus the largest RS rank changes. No fabricated daily-change series.
-6. **Stock** — company header, Action with its exact reason, price chart with the 10- and 30-week lines, calendar-month returns, 52-week range, trend-health checklist, extension and structural risk, and the complete evidence table.
-7. **Methodology** — formulas, source attribution, information boundary and the full nine-label Action framework.
+2. **Setups** — the pre-breakout view: names whose evidence says a move may be near but has not happened. Trend-template passes, relative strength leading price, contracting bases on drying volume, and Stage 1 names showing readiness. This view exists because every other view describes what a stock *is*; this one describes what it may be about to do, and that distinction must stay visible in the copy.
+3. **Screener** — the full validated universe as a dense sortable table, with Industry, Stage, RS, setup evidence and Action as the final decision column. Filters for search, Industry, Stage, Action, RS band and liquidity; paginated.
+4. **Industries** — ranked industry leadership by median RS, with participation share and median 3-month return. Industry is the NSE constituent field, never remapped.
+5. **Market** — participation: regime band, share above the 30-week and 10-week lines, 52-week-high proximity, stage posture, and the participation trend from the published breadth history.
+6. **Movers** — day-over-day structural transitions between the current and previous published snapshots, plus the largest RS rank changes. No fabricated daily-change series.
+7. **Stock** — company header, Action with its exact reason, price chart with the 10- and 30-week lines, calendar-month returns, 52-week range, trend-health checklist, extension and structural risk, and the complete evidence table.
+8. **Methodology** — formulas, source attribution, information boundary and the full nine-label Action framework.
 
 ## Action framework
 
@@ -84,3 +85,67 @@ Accents should be restrained; the page must remain predominantly white/light neu
 ## Quantitative integrity
 
 UI filters are presentation-only and must never recompute the RS ranking universe. The Action layer consumes validated outputs and cannot fabricate missing quantitative evidence.
+
+## v2.2 — the Setups view and pre-breakout presentation
+
+### Why this view is second in the navigation
+
+Setups sits immediately after the Dashboard because it answers the question the
+rest of the terminal cannot: not what a stock is, but whether its structure says
+a move may be near. Everything in it is anticipatory and must be worded as such.
+No copy in this view may assert that a move will happen.
+
+### The four sections
+
+Each section is one published condition, named for its source and section:
+
+1. **Trend template** — all eight criteria satisfied (§5.1).
+2. **RS leading price** — relative strength at a 52-week high while price is
+   still meaningfully below its own (§4.1). The ordering is the signal.
+3. **Coiling** — contracting range on drying volume within a Stage 2 base
+   (§10.5).
+4. **Stage 1 readiness** — a count in [0, 4] over basing names, surfacing the
+   ones furthest along before a Stage 2 transition is confirmed.
+
+### Screener presets
+
+Five one-click screens, each a composition of already-published fields in the
+source books' terms. A preset may **never** introduce a rule that does not
+already exist as a published field:
+
+`Buy candidates`, `Coiling`, `RS leading price`, `Template pass`, `Exit now`.
+
+Each carries a one-line description naming the section it composes. `Template
+pass` must additionally state that its thresholds are provisional.
+
+### Provisional thresholds must stay labelled
+
+Three trend-template thresholds are the source's stated values for a different
+market and era and have not been validated against NSE history. Every surface
+that displays a trend-template result — the Setups view, the preset
+description, the Stock page block, the signal card and the Methodology page —
+must mark them provisional. Removing that label requires validation evidence,
+not a UI decision.
+
+### Degrading against a pre-v2.2 snapshot
+
+A snapshot published before v2.2 carries none of these fields. The UI must
+detect their absence through the declared `V22_FIELDS` list and say so plainly,
+naming what is missing and how to regenerate it. It must not render an empty
+Setups view, substitute a default, or let a preset silently return zero rows as
+though nothing qualified — an absent field and an unsatisfied condition are
+different facts and must read differently.
+
+### Attribution
+
+Signal cards cite the specific authority for the specific evidence present in
+that row, guarded on the evidence existing. A card must never name an authority
+for a criterion it did not test. All three authorities carry equal citation
+obligation; the newest is the easiest to omit and was in fact omitted across
+every surface in the first v2.2 pass.
+
+### Not presented
+
+The contraction count and its footprint notation are specified but failed
+validation and are not published. No UI surface may display, approximate or
+imply them. See LOCKED_SPEC §10.5.2.

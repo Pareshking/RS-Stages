@@ -319,6 +319,21 @@ The 10-session slope window and formula are locked project decisions. They must 
 
 Source-code snippets using fixed trading-day row counts do not override the project's newer calendar-date decisions.
 
+Two v2.2 boundaries are recorded here as well.
+
+Three trend-template thresholds (a 30% minimum advance off the 52-week low, a
+25% maximum distance below the 52-week high, and a relative-strength floor of
+70) are the source's stated values for a different market and period. They have
+not been validated against NSE history and are labelled provisional wherever
+they surface. They must not be described as tuned or as verified here.
+
+The count of volatility contractions within a base is **not implemented**. Four
+detector designs were measured against two of the source's worked examples and
+all four failed to reproduce the count; base duration, deepest and tightest
+corrections did reproduce. The count and its footprint notation must not be
+described as available, and no estimate of them may be published in place of the
+measurement. LOCKED_SPEC §10.5.2 holds the evidence.
+
 ## 14. Next Engineering Step
 
 Proceed with independent synthetic tests and real-data validation before declaring any production quantitative component complete.
@@ -386,3 +401,149 @@ in {2, 3} }`, so participation may be evaluated from either form.
 For the breadth history, participation at session `u` counts only symbols whose
 moving average is defined at `u`, and each symbol's average at `u` is evaluated
 using data through `u` only.
+
+## v2.2 additions
+
+### A naming collision, stated first
+
+`RS Line` in §3 and `RS_Line` in this section are **different constructions**
+that unfortunately share a name.
+
+```
+§3   (v1)    RSLine_i(t) = P_i_rebased(t) / U(t)      denominator: equal-weight universe
+v2.2         RS_Line_i(t) = Close_i(t) / Close_B(t)   denominator: benchmark index
+```
+
+§3's line is rebased to the start of the download window and measures a stock
+against the average of its peers. The v2.2 line is an unrebased ratio against
+the benchmark, which is the construction the RS-divergence fields are defined
+on. They are not interchangeable and neither is derived from the other. Only
+the v2.2 line feeds `RS_Line_At_High` and `RS_Line_NH_Before_Price`.
+
+The v2.2 ratio is taken on the sessions the two series actually share, by inner
+join. A benchmark session the stock did not trade — or the reverse — is dropped
+rather than filled, since supplying either side's missing price would invent the
+quantity being measured. `RS_LINE_MIN_OVERLAP = 200` shared sessions are
+required before a 52-week line high is reported; below that the field is
+explicitly insufficient.
+
+```
+RS_Line_High_52W(T)      = max over the trailing 52 calendar weeks of RS_Line
+RS_Line_At_High          = RS_Line(T) >= RS_Line_High_52W(T) * (1 - 0.005)
+RS_Line_NH_Before_Price  = RS_Line_At_High AND Pct_From_52W_High < 0
+```
+
+The 0.005 tolerance exists so "at a new high" is not a floating-point equality.
+The ordering in the third line is the whole signal: strength reaching a new high
+while price has not is the leading tell. Once price is also at its high the
+stock is already advancing, which is a breakout, not an early warning.
+
+### Session averages
+
+```
+SMA_n(T) = mean of the n closes at or before T that exist
+```
+
+The average is taken over `n` observations that are present, never over a
+window that happens to contain `n` slots. Fewer than `n` available closes is
+explicit insufficiency, not a shorter average.
+
+**These are session counts and `MA_30W` is a calendar-week window.** Thirty
+calendar weeks is not 150 sessions. The two constructions must not be
+substituted for one another in code or in prose.
+
+```
+SMA_Rising_n(T) = SMA_n(T) > SMA_n(T - 21 sessions)
+```
+
+### Trend template
+
+Eight criteria, all required. Seven are structural and transfer without
+interpretation; two carry numeric tolerances stated by the source for a
+different market and era.
+
+```
+TT1  Close > SMA_150  and  Close > SMA_200
+TT2  SMA_150 > SMA_200
+TT3  SMA_200 rising over the trailing 21 sessions
+TT4  SMA_50  > SMA_150  and  SMA_50 > SMA_200
+TT5  Close > SMA_50
+TT6  Close >= Low_52W  * 1.30           <- provisional threshold
+TT7  Close >= High_52W * 0.75           <- provisional threshold
+TT8  RS_Score >= 70                     <- provisional threshold
+
+Trend_Template_Pass = TT1 AND ... AND TT8
+```
+
+TT6, TT7 and TT8 are implemented at the source's stated values and surface
+labelled provisional. They are **not** retuned against NSE history, because no
+holdout of sufficient size exists yet, and they are not replaced with values
+chosen here, because inventing a threshold the source does not state is exactly
+what this project forbids. See DECISION_LOG D-2.2.2.
+
+TT8 is cross-sectional and therefore resolves after `RS_Score` exists, not
+during per-symbol analysis.
+
+### Average true range
+
+```
+TR(t)     = max( High(t) - Low(t),
+                 |High(t) - Close(t-1)|,
+                 |Low(t)  - Close(t-1)| )
+
+ATR_Pct(T) = mean(TR over the trailing 14 sessions) / Close(T) * 100
+```
+
+### Volatility contraction — published subset
+
+```
+Base_Depth_Pct = (1 - min(Low over base) / max(High over base)) * 100
+```
+
+Measured peak to trough **across the base itself**. This is deliberately not
+`Pct_From_52W_High`: a stock can sit far below a distant high while building a
+shallow base, and the two quantities answer different questions.
+
+```
+Contraction_Ratio = range of the last block / range of the first block
+                    over 5 blocks spanning 50 sessions
+
+Volume_Dryup      = mean(Volume, last 10 sessions) / mean(Volume, last 50)
+
+VCP_Setup = Contraction_Ratio <= 0.60
+            AND Volume_Dryup <= 0.80
+            AND Stage is Stage 2
+            AND Base_Depth_Pct <= 35
+            AND contractions >= 2
+```
+
+The Stage 2 gate and the depth bound are **required arguments**, not defaults.
+Without them the first two conditions are satisfied by a stock declining
+quietly, which is the opposite of the pattern being screened for; 33 of 112
+flagged symbols were in decline. A default parameter would have let existing
+call sites retain that defect silently. See DECISION_LOG D-2.2.5.
+
+```
+VCP_Pivot    = highest High within the final contraction
+Pct_To_Pivot = (VCP_Pivot / Close(T) - 1) * 100
+```
+
+### Stage 1 readiness
+
+A count in [0, 4] over stocks classified Stage 1, resolved cross-sectionally
+after `RS_Score` is available:
+
+```
+Stage1_Readiness = |{ Slope_30W >= 0,
+                      Close > MA_30W,
+                      RS_Score >= 50,
+                      Volume_Dryup <= 0.80 }|
+```
+
+### Fields specified but not computed
+
+`VCP_Contractions` and the `nW d/t nT` footprint notation are specified in
+LOCKED_SPEC §10.5.1 and are **not** published. Four detector designs failed
+validation against the source's own worked examples; §10.5.2 carries the record.
+The base window, depth, pivot and volume rule above are the validated subset and
+are published. The contraction count is withheld rather than estimated.

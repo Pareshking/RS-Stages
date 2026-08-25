@@ -368,6 +368,13 @@ alone.
 
 ## 10.5.1 Volatility contraction, from the source — NEW v2.3
 
+> **STATUS: SPECIFIED, NOT IMPLEMENTED.** The detector described below has been
+> built and has failed validation against real price history four times. It is
+> not wired into the screener and nothing in this section is published. The
+> Coiling screen continues to run on §10.5's detector, whose known defects are
+> recorded there. Read this section as a design under test, not as settled
+> specification. The validation record is in §10.5.2.
+
 §10.5 above was written before the source text was available. Its detector was
 an RS-Stages construction: five fixed ten-session blocks, compared by their
 high-low range. The source specifies something different, and specifies it
@@ -492,6 +499,56 @@ are not approximated by the VCP detector.
 Post-entry management — squats, reversal recoveries, holding the 20-day average,
 tennis-ball action — is position management, not screening, and is out of scope
 for this specification entirely.
+
+## 10.5.2 What validation against the source's own charts showed — NEW v2.3
+
+Two of the source's worked examples are still listed with history covering the
+period, so the detector can be measured against a reading made by the method's
+author rather than against fixtures written here. That check is
+`scripts/validate_vcp_footprints.py`, run in CI because the development
+environment cannot reach the price provider.
+
+It has been run four times against four detector designs. All four failed.
+
+| Attempt | Design | MELI (`6W 32/6 3T`) | NFLX (`27W 27/7 3T`) |
+| --- | --- | --- | --- |
+| 1 | fixed 10-week window | not reached | not reached |
+| 2 | fixed 1.5% threshold | `5W 29/4 6T` | `25W 17/6 26T` |
+| 3 | cascading threshold | `10T`, deepest 23 | `44T` |
+| 4 | cascade + structural bounds | no qualifying base | no qualifying base |
+
+Attempt 2 established that no single threshold can work: a sweep across eleven
+values showed NFLX's deepest leg needs roughly 15% sensitivity while its
+tightest needs 8% or finer, and the contraction count needs something between.
+Every value failed differently.
+
+Attempt 3 was worse than attempt 2. Its threshold ratcheted downward after every
+contraction and never recovered, so late in a noisy base it degenerated into the
+fine fixed threshold it was meant to replace.
+
+Attempt 4 added the two properties the source states — contractions shrink left
+to right, and the count is two to six — which fixed the degeneration on
+synthetic data but not on real data. Both stocks now yield more than six
+contractions, so the footprint is withheld. This fails safely rather than
+reporting a fabricated count, but it does not read the pattern.
+
+**What every attempt got right.** Base duration, deepest correction and tightest
+correction landed within tolerance from attempt 2 onward. It is specifically the
+**contraction count** that has never been reproduced, and the deepest reading
+degrades only as a consequence of miscounting.
+
+**The standing decision.** The contraction count is not published. The elements
+that do validate — the adaptive 3-to-65-week base, the depth bounds, the pivot
+at the final contraction, the volume rule and the Stage 2 gate — are adopted;
+the count and the `nW d/t nT` footprint that depends on it are not. A number
+that cannot be reproduced against the source's own charts has no business in a
+screen that claims to implement the source's method.
+
+**A note on method, recorded because it recurred.** Each of the first three
+attempts reached for a parameter where the source was describing a structure,
+and each passed the full local test suite while being wrong. Fixtures written
+alongside a detector can only confirm the assumptions both share. Every real
+defect in this section was found by the external check.
 
 ## 10.6 The pivot — NEW v2.2
 

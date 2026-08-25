@@ -55,8 +55,52 @@ The ₹5 crore 20-session average value threshold remains an optional UI/screene
 
 ## 11. Research Platform UI
 
-The production UI is structured as Dashboard, Screener, Industries, Movers, Stock and Methodology. The Screener ends with the Action column. Stock pages expose the Action reason, evidence checklist, calculation detail and an interactive TradingView Lightweight Charts price/30W-MA view driven by repository data.
+The production UI is structured as Dashboard, Setups, Screener, Industries, Market, Movers, Stock and Methodology. The Screener ends with the Action column. Stock pages expose the Action reason, evidence checklist, calculation detail and an interactive TradingView Lightweight Charts price/30W-MA view driven by repository data.
 
 ## 12. Validation
 
 Every critical calculation and new Action condition must be independently validated using controlled datasets, manual/reference calculations and regression tests. The pre-market boundary and calendar-window definitions remain explicit look-ahead controls.
+
+## 13. Pre-breakout structure (v2.2)
+
+A third source authority is adopted alongside the stage and relative-strength
+authorities, covering the trend template and the volatility contraction pattern.
+It contributes 25 published fields and carries the same obligation as the other
+two: every field traces to a stated definition, and where the source states a
+number that number is used rather than one chosen here.
+
+Four quantities are added. A relative-strength line taken as the ratio of Close
+to the benchmark on the sessions the two actually share, which supports the
+condition that matters most — strength reaching a 52-week high while price has
+not, the ordering being the signal. An eight-criterion trend template built on
+50-, 150- and 200-session averages. Average true range as a percentage of price.
+And a base-structure group: peak-to-trough depth measured across the base
+itself, a contraction ratio, a volume dry-up ratio and the pivot with distance
+to it.
+
+Session averages and calendar averages are distinct constructions and are not
+interchangeable: the 30-week line is a calendar window, while the 150- and
+200-session averages are counts of sessions that exist. Each session average is
+taken over that many observations actually present, never over a window that
+merely spans that many slots.
+
+Three trend-template thresholds are the source's stated values for a different
+market and era. They are implemented as stated, labelled provisional on every
+surface, and neither retuned nor replaced with values invented here. Removing
+the label requires validation evidence.
+
+The contraction setup is gated on Stage 2 and bounded on base depth. Contraction
+and volume conditions alone are also satisfied by a stock declining quietly,
+which is the opposite of the pattern being screened for.
+
+## 14. What is specified and not implemented
+
+The count of contractions within a base, and the footprint notation that depends
+on it, are specified but **not** published. Four detector designs were measured
+against two of the source's own worked examples; all four failed to reproduce
+the count, while base duration, deepest and tightest corrections did reproduce.
+The validated elements are published and the count is withheld rather than
+estimated. A number that cannot be reproduced against the charts the method's
+author read does not belong behind a citation to that author.
+
+The evidence is in LOCKED_SPEC §10.5.2 and the decision in DECISION_LOG D-2.3.1.

@@ -187,3 +187,104 @@ clone has none.
 ordered with margin and share no fire minute, and every workflow that pushes
 does so through a retry with a rebase and enough history to perform it. Each
 guard was verified to fail against the configuration it replaced.
+
+## 2026-08-25 — v2.2 decisions
+
+### D-2.2.1 — A third source authority
+
+The screen implemented two authorities: Weinstein for stage structure and
+O'Neil for relative strength and breakout. Minervini is added as a third,
+covering the trend template and the volatility contraction pattern.
+
+This is not a cosmetic citation. It introduces 25 fields and changes what the
+Coiling screen means, so it carries the same obligation as the first two: every
+field traces to a stated definition, and where the source states a number the
+number is used rather than a value tuned here.
+
+Attribution was initially missed. Minervini drove 25 published fields while
+being cited in no signal card, no methodology section and no stock page — the
+two earlier authorities were named throughout. Corrected in `source_line()`,
+which now cites him for the trend template and for the contraction setup, each
+guarded on the evidence actually being present in the row so the card never
+claims a criterion it did not test. Three tests pin this.
+
+### D-2.2.2 — Trend-template thresholds ship flagged as provisional
+
+Seven of the eight trend-template criteria are structural — price above the
+150- and 200-session averages, the 150 above the 200, the 200 rising, and so
+on — and transfer without interpretation. The remaining two are numeric
+tolerances stated for a different market and a different era.
+
+They are implemented at the source's stated values and labelled provisional
+wherever they surface, rather than retuned against NSE history here. Retuning
+would require a holdout of a size this project does not yet have, and inventing
+replacement values would breach the rule against supplying a definition the
+source does not give. The flag is the honest position until the history exists.
+
+### D-2.2.3 — Session averages and calendar averages are different constructions
+
+`MA_30W` is built on calendar weeks; `SMA_150` and `SMA_200` are built on
+sessions. Thirty calendar weeks is not 150 sessions, and the two must not be
+described or computed as though they were interchangeable.
+
+A related defect was found and fixed in both implementations: the session
+average was being taken over N-1 observations rather than N. The error was
+small in value and structural in effect — it split the deepest and tightest
+readings by base length, so short and long bases were being measured on
+different definitions. Both the production path and the independent
+reconciliation now average over N closes that exist.
+
+### D-2.2.4 — The information boundary skips sessions with no close
+
+The pre-market boundary selected the latest session strictly before the
+decision date, including rows carrying no close. Every calendar window then
+shifted by one session: `MA_30W` came back missing, `Stage` came back `None`,
+and all seventeen reconciled fields disagreed with the independent
+implementation.
+
+The boundary now resolves against sessions that actually have a close. The
+defect predates v2.2 and was found by the reconciliation, not by the test
+suite — a case where the second implementation earned its cost.
+
+### D-2.2.5 — The contraction setup is gated on Stage 2 and bounded on depth
+
+`vcp_setup` tested contraction ratio and volume dry-up alone. Both conditions
+are satisfied by a stock declining quietly, which is the opposite of the
+pattern: the source describes a base forming after an advance, not a fade on
+falling volume. 112 symbols were flagged, of which 33 were in decline.
+
+Two conditions are added. The stock must be in Stage 2, and the base must not
+be deeper than 35% peak to trough. Depth is measured across the base itself,
+not from the 52-week high — a stock can sit far below a distant high while
+building a shallow base, and the two readings answer different questions, so
+`Base_Depth_Pct` is computed rather than reusing `Pct_From_52W_High`.
+
+Both parameters are required arguments, not defaults. A default would have let
+every existing call site keep the old behaviour silently, which is precisely
+the failure being corrected.
+
+### D-2.3.1 — The contraction count is specified but not published
+
+The count of contractions within a base, and the footprint notation that
+depends on it, are specified in LOCKED_SPEC §10.5.1 and are not implemented in
+the published screen.
+
+Four detector designs were built and measured against two of the source's own
+worked examples. All four failed. Base duration, deepest correction and
+tightest correction reproduce within tolerance; the count never has. The full
+record, including what each attempt got wrong and why, is in §10.5.2.
+
+The elements that validate are adopted — the adaptive base window, the depth
+bounds, the pivot, the volume rule. The count is withheld. Publishing a
+contraction count that cannot be reproduced against the charts the method's
+author read would put a fabricated number behind a citation, which the project
+does not permit regardless of how reasonable the number looks.
+
+Two method notes are recorded because they generalise. Three of the four
+attempts reached for a threshold where the source was describing a structural
+property, and the fourth, which encoded the structure, was the only one that
+failed safely. And every attempt passed the full local suite while being wrong:
+fixtures written alongside a detector share its assumptions and can only confirm
+them. Every real defect here was caught by the external check against real
+prices, which is why that check runs in CI rather than being retired now that
+the feature is shelved.
