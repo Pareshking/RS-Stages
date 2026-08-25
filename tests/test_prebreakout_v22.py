@@ -254,12 +254,57 @@ def test_volume_dryup_is_the_opposite_instrument_to_volume_ratio():
     assert quant.volume_dryup(spiked, END) < 0.80     # the base is still dry
 
 
-def test_vcp_setup_requires_all_three_conditions():
-    assert quant.vcp_setup(0.5, 0.7, 3) is True
-    assert quant.vcp_setup(0.9, 0.7, 3) is False   # range not tight enough
-    assert quant.vcp_setup(0.5, 0.95, 3) is False  # volume not drying
-    assert quant.vcp_setup(0.5, 0.7, 1) is False   # a single step is not a pattern
-    assert quant.vcp_setup(float("nan"), 0.7, 3) is False
+#: A structure that passes on every price measurement, so each test below
+#: isolates exactly one gate.
+GOOD = dict(ratio=0.5, dryup=0.7, contractions=3, stage="Stage 2 \u2014 Advancing", depth_pct=20.0)
+
+
+def test_vcp_setup_requires_all_three_price_conditions():
+    assert quant.vcp_setup(**GOOD) is True
+    assert quant.vcp_setup(**(GOOD | {"ratio": 0.9})) is False    # range not tight enough
+    assert quant.vcp_setup(**(GOOD | {"dryup": 0.95})) is False   # volume not drying
+    assert quant.vcp_setup(**(GOOD | {"contractions": 1})) is False  # one step is not a pattern
+    assert quant.vcp_setup(**(GOOD | {"ratio": float("nan")})) is False
+
+
+def test_a_contracting_base_outside_stage_2_is_not_a_setup():
+    """§10.5.1 — the structure looks identical; the context inverts its meaning.
+
+    The source will not buy a base inside a downtrend, however well formed.
+    Without this gate 42% of the live screen was stocks that were not in Stage 2,
+    33 of them in confirmed decline, presented as bases about to resolve upward.
+    """
+    for stage in ("Stage 1 \u2014 Basing", "Stage 3 \u2014 Topping", "Stage 4 \u2014 Declining"):
+        assert quant.vcp_setup(**(GOOD | {"stage": stage})) is False, stage
+    assert quant.vcp_setup(**(GOOD | {"stage": None})) is False
+    assert quant.vcp_setup(**(GOOD | {"stage": float("nan")})) is False
+    # And the price measurements themselves stay stage-blind: only the composite
+    # judgement is gated, so the underlying structure is still described.
+    assert quant.contraction_ratio([20.0, 16.0, 12.0, 8.0, 4.0]) == pytest.approx(0.2)
+
+
+def test_a_base_that_cut_too_deep_is_not_a_setup():
+    """§10.5.1 — overhead supply above a deep correction caps the advance."""
+    assert quant.vcp_setup(**(GOOD | {"depth_pct": 35.0})) is True    # at the bound
+    assert quant.vcp_setup(**(GOOD | {"depth_pct": 35.1})) is False
+    assert quant.vcp_setup(**(GOOD | {"depth_pct": 51.7})) is False   # worst seen live
+    assert quant.vcp_setup(**(GOOD | {"depth_pct": float("nan")})) is False
+    assert quant.VCP_REJECT_BASE_DEPTH_PCT == 60.0
+
+
+def test_base_depth_is_peak_to_trough_not_distance_from_the_52_week_high():
+    """They are different quantities and the source gates on the former."""
+    idx = pd.bdate_range(end=END, periods=60)
+    # Base peaks at 100 and troughs at 75 -> a 25% correction.
+    high = pd.Series([100.0] * 30 + [80.0] * 30, index=idx)
+    low = pd.Series([90.0] * 30 + [75.0] * 30, index=idx)
+    assert quant.base_depth_pct(high, low, END) == pytest.approx(25.0)
+
+    short = pd.bdate_range(end=END, periods=20)
+    with pytest.raises(ValueError):
+        quant.base_depth_pct(
+            pd.Series(1.0, index=short), pd.Series(1.0, index=short), END
+        )
 
 
 # --- pivot and readiness -----------------------------------------------------

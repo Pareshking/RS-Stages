@@ -7,6 +7,7 @@ import pandas as pd
 from .data import DecisionSnapshot
 from .quant import (
     atr_pct,
+    base_depth_pct,
     breakout,
     breakout_confirmed,
     classify_stage,
@@ -202,7 +203,7 @@ def _analyze_symbol(
         else False
     )
 
-    row.update(_prebreakout(data, close, high, volume, t, benchmark))
+    row.update(_prebreakout(data, close, high, volume, t, benchmark, row.get("Stage")))
     row["Pct_To_Pivot"] = pct_to_pivot(row["Close"], row["VCP_Pivot"])
 
     trend = None
@@ -227,6 +228,7 @@ def _prebreakout(
     volume: pd.Series,
     t: pd.Timestamp,
     benchmark: pd.Series | None,
+    stage: str | None = None,
 ) -> dict:
     """v2.2 §4.1, §5.1, §10.4-10.6 fields that need no cross-sectional input.
 
@@ -262,10 +264,15 @@ def _prebreakout(
         except (ValueError, KeyError):
             row["VCP_Contractions"] = 0
             row["Contraction_Ratio"] = float("nan")
+        try:
+            row["Base_Depth_Pct"] = base_depth_pct(high, low, t)
+        except (ValueError, KeyError):
+            row["Base_Depth_Pct"] = float("nan")
     else:
         row["ATR_Pct"] = float("nan")
         row["VCP_Contractions"] = 0
         row["Contraction_Ratio"] = float("nan")
+        row["Base_Depth_Pct"] = float("nan")
 
     try:
         row["Volume_DryUp"] = volume_dryup(volume, t)
@@ -273,7 +280,11 @@ def _prebreakout(
         row["Volume_DryUp"] = float("nan")
 
     row["VCP_Setup"] = vcp_setup(
-        row["Contraction_Ratio"], row["Volume_DryUp"], row["VCP_Contractions"]
+        row["Contraction_Ratio"],
+        row["Volume_DryUp"],
+        row["VCP_Contractions"],
+        stage,
+        row["Base_Depth_Pct"],
     )
 
     try:

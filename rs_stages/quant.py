@@ -265,6 +265,14 @@ VCP_BLOCKS = 5
 VCP_CONTRACTION_RATIO_MAX = 0.60
 VCP_VOLUME_DRYUP_MAX = 0.80
 VCP_MIN_CONTRACTIONS = 2
+
+#: §10.5.1 — depth bounds, from the source. It states that most constructive
+#: setups correct between 10% and 35%, and that a stock down 60% or more is
+#: rarely worth buying because the overhead supply above it is punishing. The
+#: upper gate is the constructive bound; the rejection bound is recorded
+#: separately because the two carry different weight in the source.
+VCP_MAX_BASE_DEPTH_PCT = 35.0
+VCP_REJECT_BASE_DEPTH_PCT = 60.0
 VOLUME_DRYUP_RECENT = 10
 VOLUME_DRYUP_BASELINE = 50
 
@@ -501,9 +509,57 @@ def volume_dryup(volume: pd.Series, end: pd.Timestamp) -> float:
     return recent / baseline
 
 
-def vcp_setup(ratio: float, dryup: float, contractions: int) -> bool:
-    """§10.5 — tightening range, drying volume, and more than a single step."""
+def base_depth_pct(high: pd.Series, low: pd.Series, end: pd.Timestamp) -> float:
+    """§10.5.1 — the base's peak-to-trough correction, as a percentage.
+
+    Measured across the base window from its highest High to its lowest Low.
+    This is the "how far did it correct" the source gates on, and it is not
+    ``Pct_From_52W_High``: a stock can sit close to its 52-week high while its
+    base still cut deeply, and vice versa.
+    """
+    h, l = high.sort_index().astype(float), low.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    pos = _position(h.index, end)
+    if pos + 1 < VCP_BASE_SESSIONS:
+        raise ValueError("Insufficient history for the base depth")
+    window_h = h.iloc[pos + 1 - VCP_BASE_SESSIONS : pos + 1]
+    window_l = l.iloc[pos + 1 - VCP_BASE_SESSIONS : pos + 1]
+    peak = float(window_h.max())
+    trough = float(window_l.min())
+    if not np.isfinite(peak) or peak <= 0:
+        return float("nan")
+    return (peak - trough) / peak * 100.0
+
+
+def vcp_setup(
+    ratio: float,
+    dryup: float,
+    contractions: int,
+    stage: str | None,
+    depth_pct: float,
+) -> bool:
+    """§10.5.1 — a tradeable setup, not merely a contracting range.
+
+    The measurements this composes stay pure: ``Contraction_Ratio``,
+    ``Volume_DryUp`` and ``VCP_Contractions`` describe the price structure
+    wherever it occurs. This function answers the different question of whether
+    the structure is worth acting on, which the source gates two further ways.
+
+    **Stage 2 is required.** The source is emphatic that a base is only
+    tradeable inside an established uptrend, and that an attractive base within
+    a downtrend is the classic error — the structure looks identical and the
+    context inverts its meaning. Without this gate the screen presented
+    declining stocks as coiling: 42% of it, on the snapshot that exposed this.
+
+    **The base must not have cut too deep.** A deeply corrected stock carries
+    overhead supply that caps the advance a breakout could produce, so the
+    source bounds constructive corrections and rejects the deepest outright.
+    """
     if not (np.isfinite(ratio) and np.isfinite(dryup)):
+        return False
+    if not str(stage).startswith("Stage 2"):
+        return False
+    if not np.isfinite(depth_pct) or depth_pct > VCP_MAX_BASE_DEPTH_PCT:
         return False
     return bool(
         ratio <= VCP_CONTRACTION_RATIO_MAX
