@@ -348,14 +348,22 @@ def test_stage1_readiness_counts_only_what_is_satisfied():
 # has no access to. A detector can pass every test here and still disagree with
 # how the source read an actual chart.
 
-def _base_with_depths(depths, bars_per_leg=9, start=100.0):
-    """A price path whose peak-to-trough contractions are exactly `depths`."""
+def _base_with_depths(depths, bars_per_leg=9, start=100.0, recovery=0.8, noise_pct=0.0):
+    """A price path whose peak-to-trough contractions are exactly `depths`.
+
+    Each decline is followed by a rally recovering most of it, which is what a
+    real base does: the source's own example fell 19 to 13 and then rallied back
+    to nearly 17. An earlier version of this helper rallied only 6% off each
+    low, and that unrealism is why the whole suite passed while the detector
+    failed against real price history — a fixture that never presents the hard
+    case cannot fail on it.
+    """
     points = [(start, True)]
     peak = start
     for depth in depths:
         trough = peak * (1 - depth / 100.0)
         points.append((trough, False))
-        peak = trough * 1.06
+        peak = trough + (peak - trough) * recovery
         points.append((peak, True))
     points = points[:-1]
 
@@ -365,6 +373,11 @@ def _base_with_depths(depths, bars_per_leg=9, start=100.0):
     prices.append(points[-1][0])
     idx = pd.bdate_range(end=END, periods=len(prices))
     path = pd.Series(prices, index=idx)
+    if noise_pct:
+        # Real declines are not monotonic; they oscillate on the way down. That
+        # oscillation is what a fine threshold mistakes for structure.
+        rng = np.random.default_rng(11)
+        path = path * (1 + rng.normal(0, noise_pct / 100.0, len(path)))
     return path * 1.0005, path * 0.9995
 
 
@@ -418,3 +431,88 @@ def test_swings_strictly_alternate():
     high, low = _base_with_depths([25.0, 12.0, 5.0])
     kinds = [k for _, _, k in quant.swing_points(high, low)]
     assert all(a != b for a, b in zip(kinds, kinds[1:])), kinds
+
+
+# --- v2.3 cascading contractions --------------------------------------------
+
+@pytest.mark.parametrize(
+    "label,depths",
+    [
+        ("VIVO", [31.0, 17.0, 8.0, 3.0]),
+        ("KCP", [32.0, 14.0, 7.0, 3.0]),
+        ("New Oriental", [22.0, 8.0, 2.0]),
+        ("NFLX", [27.0, 14.0, 7.0]),
+        ("MELI", [32.0, 14.0, 6.0]),
+    ],
+)
+def test_the_cascade_recovers_the_sources_depth_sequences(label, depths):
+    high, low = _base_with_depths(depths)
+    got = [d for _, _, d in quant.cascading_contractions(high, low, END)]
+    assert len(got) == len(depths), f"{label}: {[round(g) for g in got]} vs {depths}"
+    for a, b in zip(got, depths):
+        assert a == pytest.approx(b, abs=0.6), f"{label}: {[round(g) for g in got]}"
+
+
+def test_no_single_fixed_threshold_can_read_this_pattern():
+    """Why the cascade exists, pinned so it cannot be quietly reverted.
+
+    A base whose first contraction is 27% and whose last is 7% defeats any one
+    threshold: coarse enough to hold the first leg together, it steps over the
+    last; fine enough to see the last, it shatters the first. Measured against
+    the source's own footprints, every fixed value failed in a different way.
+    """
+    clean_high, clean_low = _base_with_depths([27.0, 14.0, 7.0])
+
+    # Coarse: holds the deepest leg together but steps over the tightest.
+    coarse = quant.contraction_depths(quant.swing_points(clean_high, clean_low, 15.0))
+    assert len(coarse) < 3, "a 15% threshold should miss the tightest contraction"
+
+    # Fine: over-counts, because a noisy path offers counter-moves it mistakes
+    # for structure. Note this fixture shows the effect only mildly — a modest
+    # over-count, not the collapse seen on real data, where the same threshold
+    # read 26 contractions off NFLX against the source's 3. Synthetic noise is
+    # too well behaved to reproduce that, and cranking it until it did would be
+    # fitting the fixture to a conclusion. The severe case is evidenced by
+    # scripts/validate_vcp_footprints.py against real price history; what this
+    # test pins is the direction of the failure and the tension between the two
+    # thresholds, which is what makes a single constant unworkable.
+    noisy_high, noisy_low = _base_with_depths([27.0, 14.0, 7.0], noise_pct=1.6)
+    fine = quant.contraction_depths(quant.swing_points(noisy_high, noisy_low, 1.5))
+    assert len(fine) > 3, f"fine threshold should over-count, got {len(fine)}"
+
+    # The cascade reads all three at their stated depths, noise and all.
+    cascade = [d for _, _, d in quant.cascading_contractions(noisy_high, noisy_low, END)]
+    assert len(cascade) == 3, [round(c) for c in cascade]
+    # Tolerance derived from the fixture, not chosen to pass: 1.6% noise applied
+    # to both the peak and the trough can inflate a nominal depth by ~3pp.
+    assert max(cascade) == pytest.approx(27.0, abs=3.5)
+
+
+def test_the_cascade_ratio_must_stay_below_the_halving_it_tracks():
+    """The source describes each contraction as roughly half the previous.
+
+    A search threshold at or above half the previous depth steps over the very
+    contraction it is looking for. The value is calibrated, not derived, so this
+    pins the relationship rather than the number.
+    """
+    assert quant.CASCADE_RATIO < 0.5
+    high, low = _base_with_depths([22.0, 8.0, 2.0])
+    tight = quant.cascading_contractions(high, low, END, ratio=0.5)
+    assert len(tight) < 3, "ratio 0.5 should lose the 2% contraction"
+    ok = quant.cascading_contractions(high, low, END)
+    assert len(ok) == 3
+
+
+def test_the_footprint_reports_the_final_contraction_as_the_pivot():
+    high, low = _base_with_depths([30.0, 12.0, 5.0])
+    fp = quant.vcp_footprint(high, low, END)
+    assert fp["Contractions"] == 3
+    assert fp["Deepest_Pct"] == pytest.approx(30.0, abs=0.6)
+    assert fp["Tightest_Pct"] == pytest.approx(5.0, abs=0.6)
+    # The pivot opens the last contraction, so it sits below the base's own top.
+    assert fp["VCP_Pivot"] < float(high.max())
+
+
+def test_a_base_outside_three_to_sixty_five_weeks_is_not_a_vcp():
+    high, low = _base_with_depths([30.0, 12.0, 5.0], bars_per_leg=1)
+    assert not pd.notna(quant.vcp_footprint(high, low, END)["Base_Weeks"])

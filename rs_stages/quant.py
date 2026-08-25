@@ -741,30 +741,24 @@ def vcp_footprint(
     if len(h) < 2:
         return dict(absent)
 
-    swings = swing_points(h, l, threshold_pct)
-    peaks = [(stamp, price) for stamp, price, kind in swings if kind == "H"]
-    if not peaks:
+    found = cascading_contractions(h, l, stop)
+    if not found:
         return dict(absent)
 
-    # The absolute high the stock comes off opens the base.
-    base_start, _ = max(peaks, key=lambda pair: pair[1])
+    base_start = found[0][0]
     weeks = (stop - base_start).days / 7.0
     if not (VCP_MIN_BASE_WEEKS <= weeks <= VCP_MAX_BASE_WEEKS):
         return dict(absent)
 
-    within = [s for s in swings if s[0] >= base_start]
-    depths = contraction_depths(within)
-    if not depths:
-        return dict(absent)
-
-    peak_at, tightest = depths[-1]
-    peak_price = next((p for stamp, p, k in within if stamp == peak_at and k == "H"), float("nan"))
+    # The pivot is the high opening the final, tightest contraction — not the
+    # top of the base, which is where the base began.
+    pivot_stamp, pivot_price, tightest = found[-1]
     return {
         "Base_Weeks": float(weeks),
-        "Deepest_Pct": float(max(d for _, d in depths)),
+        "Deepest_Pct": float(max(d for _, _, d in found)),
         "Tightest_Pct": float(tightest),
-        "Contractions": int(len(depths)),
-        "VCP_Pivot": float(peak_price),
+        "Contractions": int(len(found)),
+        "VCP_Pivot": float(pivot_price),
     }
 
 
@@ -776,3 +770,85 @@ def footprint_label(fp: dict) -> str:
     if any(v is None for v in (weeks, deep, tight)):
         return "—"
     return f"{round(weeks)}W {round(deep)}/{round(tight)} {int(fp['Contractions'])}T"
+
+
+#: §10.5.1 — cascade parameters. The source describes each contraction as
+#: roughly half the previous, so the sensitivity used to find contraction i+1 is
+#: derived from the depth of contraction i rather than fixed. A sweep against
+#: two of the source's own footprints showed no single fixed threshold can work:
+#: NFLX's deepest leg (27%) needs ~15% sensitivity while its tightest (7%) needs
+#: ~8% or finer, and the contraction count needs something in between.
+CASCADE_INITIAL_PCT = 15.0
+CASCADE_RATIO = 0.25
+CASCADE_FLOOR_PCT = 1.5
+
+
+def cascading_contractions(
+    high: pd.Series,
+    low: pd.Series,
+    end: pd.Timestamp,
+    initial_pct: float = CASCADE_INITIAL_PCT,
+    ratio: float = CASCADE_RATIO,
+    floor_pct: float = CASCADE_FLOOR_PCT,
+) -> list[tuple[pd.Timestamp, float, float]]:
+    """Contractions found with sensitivity that tightens as they shrink.
+
+    Returns ``(peak timestamp, peak price, depth percent)`` oldest first.
+
+    A fixed-threshold zigzag cannot read this pattern. Coarse enough to keep a
+    27% leg intact, it steps over the 3% leg that forms the pivot; fine enough
+    to see the 3%, it shatters the 27% into a dozen fragments — which inflates
+    the count and deflates the deepest reading at the same time. Measured
+    against the source's own footprints, every fixed value failed differently.
+
+    So the threshold adapts: the search for each contraction is scaled to the
+    depth of the one before it, which is how the source describes reading them.
+    The first contraction uses ``initial_pct``; each subsequent search uses the
+    previous depth times ``ratio``, floored so a base of ever-tinier wiggles
+    cannot run away.
+    """
+    h = high.sort_index().astype(float)
+    l = low.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    stop = pd.Timestamp(end)
+    window = pd.DataFrame({"h": h, "l": l}).loc[:stop].dropna()
+    if len(window) < 3:
+        return []
+
+    stamps = list(window.index)
+    highs = window["h"].to_numpy()
+    lows = window["l"].to_numpy()
+
+    # The base opens at the absolute high the stock comes off.
+    start = int(highs.argmax())
+    if start >= len(highs) - 2:
+        return []
+
+    out: list[tuple[pd.Timestamp, float, float]] = []
+    peak, peak_at = highs[start], start
+    trough = lows[start]
+    threshold = initial_pct
+    seeking_trough = True
+
+    for j in range(start + 1, len(window)):
+        if seeking_trough:
+            if lows[j] < trough:
+                trough = lows[j]
+            if peak > 0 and highs[j] >= trough * (1 + threshold / 100.0):
+                depth = (peak - trough) / peak * 100.0
+                out.append((stamps[peak_at], float(peak), float(depth)))
+                threshold = max(floor_pct, depth * ratio)
+                seeking_trough = False
+                peak, peak_at = highs[j], j
+        else:
+            if highs[j] > peak:
+                peak, peak_at = highs[j], j
+            if lows[j] <= peak * (1 - threshold / 100.0):
+                seeking_trough = True
+                trough = lows[j]
+
+    # The contraction in progress at T is the one that forms the pivot, so it is
+    # reported rather than withheld until it resolves.
+    if seeking_trough and peak > trough > 0:
+        out.append((stamps[peak_at], float(peak), float((peak - trough) / peak * 100.0)))
+    return out
