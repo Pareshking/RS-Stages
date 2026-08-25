@@ -315,3 +315,42 @@ not something to publish through.
 Both halves are pinned by tests, and the original failure was reproduced against
 the exact comprehension that shipped before verifying the replacement survives
 it.
+
+### D-2.2.7 — Five v2.2 formulas were published with wrong numbers
+
+The v2.2 section of FORMULAS.md, written hours earlier, misstated five
+quantities. They were written from the locked spec and from memory rather than
+read out of `quant.py`, and every one of them passed review here because the
+prose was internally coherent.
+
+| Documented | Actually implemented |
+| --- | --- |
+| `RS_Line_NH_Before_Price`: price below its 52-week high | price **5% or more** below it |
+| `Volume_Dryup`: last 10 sessions over the last 50 | last 10 over the **50 preceding** them — disjoint |
+| `Base_Depth_Pct`: "across the base" | the trailing **50 sessions** |
+| `VCP_Pivot`: high of the final contraction | high of the **whole base** |
+| `Stage1_Readiness`: 4 criteria on 0–4 | **5** criteria on **0–5**, four thresholds different |
+
+Two were materially misleading rather than merely imprecise. A reader applying
+the documented RS-divergence rule to the 24 Aug 2026 snapshot would expect 25
+symbols; the published figure is 0, because all 25 sit within 4.23% of their own
+price high and the real rule requires 5%. And `Stage1_Readiness` reached 4 in
+that snapshot, which reads as full marks on the documented 0–4 scale and is one
+short on the real 0–5 one.
+
+The RS-divergence gap and all five readiness thresholds are ours, not the
+source's, and were not labelled as such. They are now, next to the numbers
+themselves.
+
+`VCP_Pivot` is a known approximation rather than a mistake: the source puts the
+pivot at the top of the final contraction, which needs the detector that failed
+validation (§10.5.2). The docs now say so, and note the direction of the error —
+where base high and final-contraction high differ the published pivot is too
+high, so `Pct_To_Pivot` overstates the distance and is conservative.
+
+`tests/test_docs_match_code.py` pins every documented threshold to the constant
+the code uses and asserts the specific wrong forms are absent. Prose can drift
+from code silently; a number cannot, once a test holds both ends. The general
+lesson is the one already recorded in §10.5.2 from a different direction:
+internal consistency is not evidence, and the check has to reach outside the
+artefact being checked.

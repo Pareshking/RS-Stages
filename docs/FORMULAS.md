@@ -430,13 +430,22 @@ explicitly insufficient.
 ```
 RS_Line_High_52W(T)      = max over the trailing 52 calendar weeks of RS_Line
 RS_Line_At_High          = RS_Line(T) >= RS_Line_High_52W(T) * (1 - 0.005)
-RS_Line_NH_Before_Price  = RS_Line_At_High AND Pct_From_52W_High < 0
+RS_Line_NH_Before_Price  = RS_Line_At_High AND Pct_From_52W_High <= -5.0
 ```
 
 The 0.005 tolerance exists so "at a new high" is not a floating-point equality.
+
 The ordering in the third line is the whole signal: strength reaching a new high
 while price has not is the leading tell. Once price is also at its high the
 stock is already advancing, which is a breakout, not an early warning.
+
+**The -5.0 gap is ours, not the source's.** "Price has not made a new high" is
+satisfied at -0.1%, but a stock a tenth of a percent off its high is at its high
+for every practical purpose, so the gap requires price to be demonstrably off
+it. The threshold changes the field's meaning and must not be described as the
+source's. Its effect is large: on the 24 Aug 2026 snapshot, 25 symbols were at a
+52-week RS-line high and every one of them was within 4.23% of its own price
+high, so the published count was 0, not 25.
 
 ### Session averages
 
@@ -500,15 +509,17 @@ ATR_Pct(T) = mean(TR over the trailing 14 sessions) / Close(T) * 100
 Base_Depth_Pct = (1 - min(Low over base) / max(High over base)) * 100
 ```
 
-Measured peak to trough **across the base itself**. This is deliberately not
-`Pct_From_52W_High`: a stock can sit far below a distant high while building a
-shallow base, and the two quantities answer different questions.
+Measured peak to trough across the **trailing 50 sessions**, which is §10.5's
+base window. This is deliberately not `Pct_From_52W_High`: a stock can sit far
+below a distant high while building a shallow base, and the two quantities
+answer different questions.
 
 ```
 Contraction_Ratio = range of the last block / range of the first block
                     over 5 blocks spanning 50 sessions
 
-Volume_Dryup      = mean(Volume, last 10 sessions) / mean(Volume, last 50)
+Volume_Dryup      = mean(Volume over the last 10 sessions)
+                    / mean(Volume over the 50 sessions BEFORE those 10)
 
 VCP_Setup = Contraction_Ratio <= 0.60
             AND Volume_Dryup <= 0.80
@@ -524,21 +535,39 @@ flagged symbols were in decline. A default parameter would have let existing
 call sites retain that defect silently. See DECISION_LOG D-2.2.5.
 
 ```
-VCP_Pivot    = highest High within the final contraction
+VCP_Pivot    = highest High over the trailing 50 sessions
 Pct_To_Pivot = (VCP_Pivot / Close(T) - 1) * 100
 ```
 
+The source places the pivot at the top of the **final** contraction, not at the
+top of the whole base. Those differ whenever the base's high sits in an early
+leg, and the implementation currently takes the base high. Locating the final
+contraction requires the contraction detector, which failed validation
+(§10.5.2), so the refinement is deferred rather than approximated. Where the two
+disagree the published pivot is too high, making `Pct_To_Pivot` conservative.
+
 ### Stage 1 readiness
 
-A count in [0, 4] over stocks classified Stage 1, resolved cross-sectionally
+A count in **[0, 5]** over stocks classified Stage 1, resolved cross-sectionally
 after `RS_Score` is available:
 
 ```
-Stage1_Readiness = |{ Slope_30W >= 0,
-                      Close > MA_30W,
-                      RS_Score >= 50,
-                      Volume_Dryup <= 0.80 }|
+Stage1_Readiness = |{ Slope_30W        >= -0.10,
+                      RS_Score         >=  50,
+                      Contraction_Ratio <=  0.70,
+                      Volume_Dryup      <=  0.90,
+                      Close > MA_10W          }|
 ```
+
+All five thresholds are ours. They rank basing stocks against each other and
+nothing else: no Stage, RS ranking, breakout test or Action label reads this
+field, and a Stage 1 stock scoring 5 still carries the Stage 1 action.
+
+The slope floor is slightly negative on purpose — a base whose 30-week line is
+still drifting down is the normal case for Stage 1, and a floor at zero would
+select only stocks that have already turned. The dry-up and contraction bounds
+are looser than §10.5's because a Stage 1 base is earlier and less formed than a
+Stage 2 one.
 
 ### Fields specified but not computed
 
