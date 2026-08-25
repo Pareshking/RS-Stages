@@ -288,3 +288,30 @@ fixtures written alongside a detector share its assumptions and can only confirm
 them. Every real defect here was caught by the external check against real
 prices, which is why that check runs in CI rather than being retired now that
 the feature is shelved.
+
+### D-2.2.6 — One unavailable symbol must not fail the audit, and an outage must not publish
+
+A manually dispatched run on 25 Aug 2026 aborted with "No completed market
+session exists before decision date". Three tickers timed out against the
+provider and one returned no rows at all; the empty frame raised out of the
+dict comprehension that built the snapshots and killed the whole 750-symbol
+audit. Nothing was published, so the failure was loud and safe — but it was
+also total, and the cause was a single delisted-looking symbol.
+
+The comprehension is now a loop that records each unavailable symbol with its
+reason and continues. That alone would be the wrong fix. `RS_Score` is a
+cross-sectional percentile over the symbols actually analysed, so every dropped
+symbol shifts the rank of every symbol that survives; a provider outage removing
+a large slice of the universe would republish everything with quietly wrong
+ranks and nothing in the output would look unusual. Skipping without a bound
+converts a loud failure into a silent one, which is the worse trade.
+
+So the skip is bounded. Above 2% of the universe the audit refuses to publish
+and says why. The ceiling is an engineering guard, not a quantity from any
+source, and is labelled as such at its definition, in the failure message and in
+FORMULAS. A delisting or a stray timeout is expected and reported; an outage is
+not something to publish through.
+
+Both halves are pinned by tests, and the original failure was reproduced against
+the exact comprehension that shipped before verifying the replacement survives
+it.

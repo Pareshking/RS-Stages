@@ -32,6 +32,50 @@ BREADTH_SESSIONS = 250
 #: divergence between the two lines can be composition, not market behaviour.
 BENCHMARK_KEY = "NIFTY_500"
 
+#: Share of the universe that may be missing before the audit refuses to
+#: publish. An engineering guard, not a quantity from any source: RS_Score is a
+#: cross-sectional percentile, so a depleted universe silently re-ranks every
+#: symbol that survives. A delisting or a stray provider timeout is expected and
+#: reported; an outage is not something to publish through.
+MAX_UNIVERSE_LOSS_PCT = 2.0
+
+
+def build_universe_snapshots(
+    symbols, histories: dict, decision: pd.Timestamp
+) -> tuple[dict, list[tuple[str, str]]]:
+    """Snapshot every symbol the provider actually delivered.
+
+    Returns the snapshots and the symbols that could not be snapshotted, each
+    with its reason. A symbol with no completed session before the decision
+    date carries no information at the boundary, so excluding it is the same
+    explicit insufficiency the quant layer applies everywhere else.
+    """
+    snapshots: dict = {}
+    unavailable: list[tuple[str, str]] = []
+    for symbol in symbols:
+        name = str(symbol)
+        try:
+            snapshots[name] = build_decision_snapshot(histories[name], decision)
+        except KeyError:
+            unavailable.append((name, "the provider returned no history"))
+        except ValueError as exc:
+            unavailable.append((name, str(exc)))
+    return snapshots, unavailable
+
+
+def enforce_universe_coverage(missing: int, total: int) -> None:
+    """Refuse to publish a universe too depleted to rank against itself."""
+    loss_pct = missing / total * 100 if total else 0.0
+    if loss_pct > MAX_UNIVERSE_LOSS_PCT:
+        raise SystemExit(
+            f"{missing} of {total} symbols ({loss_pct:.1f}%) had no usable "
+            f"history, above the {MAX_UNIVERSE_LOSS_PCT}% tolerance. RS_Score "
+            "is a cross-sectional percentile, so publishing a universe this "
+            "depleted would rank every remaining symbol against a set the "
+            "snapshot does not disclose. Re-run once the provider recovers."
+        )
+
+
 
 def independent_calendar_asof(index: pd.DatetimeIndex, target: pd.Timestamp) -> pd.Timestamp:
     idx = pd.DatetimeIndex(index).sort_values().unique()
@@ -270,10 +314,32 @@ def main() -> None:
     # the same download, so the previous-session snapshot cannot disagree with
     # the current one because of a provider revision between two calls.
     histories = acquire_universe_histories(args.universe, start, end)
-    snapshots = {
-        str(symbol): build_decision_snapshot(histories[str(symbol)], decision)
-        for symbol in universe["Symbol"]
-    }
+
+    # A symbol the provider could not deliver is explicit insufficiency, not a
+    # reason to lose the other 749. Three tickers timed out against Yahoo on the
+    # run of 25 Aug 2026 and one came back with no rows at all, which raised out
+    # of the comprehension this replaces and aborted the whole audit before
+    # anything was published.
+    #
+    # Skipping is not silent, and it is bounded. RS_Score is a cross-sectional
+    # percentile over the symbols actually analysed, so every dropped symbol
+    # shifts the rank of every symbol that remains. A handful is immaterial; a
+    # provider outage that removed a large slice would republish the whole
+    # universe with quietly wrong ranks and nothing in the output would look
+    # unusual. Past the tolerance the run therefore fails instead of publishing.
+    #
+    # The 2% ceiling is an engineering guard, not a quantity from any source,
+    # and is named as such wherever it surfaces.
+    snapshots, unavailable = build_universe_snapshots(
+        universe["Symbol"], histories, decision
+    )
+
+    if unavailable:
+        print(f"\nExcluded {len(unavailable)} of {len(universe)} symbols:")
+        for name, reason in unavailable:
+            print(f"  {name}: {reason}")
+
+    enforce_universe_coverage(len(unavailable), len(universe))
 
     # The previous snapshot re-runs the identical pipeline with the information
     # boundary moved back one completed session. It is not a stored copy of an
