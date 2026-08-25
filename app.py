@@ -53,7 +53,7 @@ st.set_page_config(
 )
 st.markdown(theme.stylesheet(), unsafe_allow_html=True)
 
-VIEWS = ["Dashboard", "Screener", "Industries", "Market", "Movers", "Stock", "Methodology"]
+VIEWS = ["Dashboard", "Setups", "Screener", "Industries", "Market", "Movers", "Stock", "Methodology"]
 STAGE_ORDER = ["Stage 2", "Stage 3", "Stage 4", "Stage 1"]
 ACTION_ORDER = ["BUY★", "BUY", "HOLD", "WAIT", "WATCH★", "WATCH", "REDUCE", "SELL", "AVOID"]
 PAGE_SIZE = 50
@@ -169,6 +169,7 @@ def missing(key: str) -> bool:
         "previous": "Day-over-day comparison is unavailable",
         "breadth": "Participation history is not published yet",
         "v21_fields": "This snapshot predates locked-spec v2.1",
+        "v22_fields": "The pre-breakout structure is not published yet",
     }
     write(ui.missing_notice(titles.get(key, "Unavailable"), detail))
     return True
@@ -416,6 +417,42 @@ SORTS = {
 }
 
 
+#: Canonical screens. Each composes published fields only; none introduces a
+#: rule, and the Action column remains the guide's own interpretation.
+SCREENER_PRESETS = {
+    "None": ("", lambda f: f),
+    "Buy candidates": (
+        "Stage 2, RS 80 or better, not extended beyond 20% above the 30-week line, and "
+        "holding the 50-session average — the guide's own entry conditions, composed.",
+        lambda f: f[
+            (f["Stage_Label"] == "Stage 2")
+            & (pd.to_numeric(f["RS_Score"], errors="coerce") >= 80)
+            & (~f["Extended_20Pct"].fillna(False).astype(bool))
+            & (~f["Below_50DMA"].fillna(False).astype(bool))
+        ],
+    ),
+    "Coiling": (
+        "Contracting range and drying volume across the 50-session base (§10.5).",
+        lambda f: f[f["VCP_Setup"].fillna(False).astype(bool)],
+    ),
+    "RS leading price": (
+        "Relative strength at a 52-week high while price is still 5% or more below its own (§4.1).",
+        lambda f: f[f["RS_Line_NH_Before_Price"].fillna(False).astype(bool)],
+    ),
+    "Template pass": (
+        "All eight Minervini trend-template criteria satisfied (§5.1). Thresholds provisional.",
+        lambda f: f[f["Trend_Template_Pass"].fillna(False).astype(bool)],
+    ),
+    "Exit now": (
+        "Stage 4, or Stage 3 with volume confirming distribution — where the guide says reduce.",
+        lambda f: f[
+            (f["Stage_Label"] == "Stage 4")
+            | ((f["Stage_Label"] == "Stage 3") & f["Distribution"].fillna(False).astype(bool))
+        ],
+    ),
+}
+
+
 def page_screener() -> None:
     heading(
         "Screener",
@@ -428,6 +465,17 @@ def page_screener() -> None:
     query = row1[0].text_input("Search", placeholder="Symbol, company or industry", key="screener_query")
     industry = row1[1].selectbox("Industry", industries, key="screener_industry")
     sort_label = row1[2].selectbox("Sort by", list(SORTS), key="screener_sort")
+
+    # Canonical screens as one click. Each is a composition of published fields
+    # in the source books' own terms — nothing here is a new rule, and the
+    # filters remain presentation only.
+    preset = st.segmented_control(
+        "Preset",
+        list(SCREENER_PRESETS),
+        default="None",
+        key="screener_preset",
+        help="Presets compose existing published fields; they never recompute the RS ranking.",
+    )
 
     stages = st.segmented_control(
         "Stage",
@@ -443,8 +491,23 @@ def page_screener() -> None:
     liquid_only = row2[1].toggle(
         "Liquid only (20-session traded value above ₹5 Cr)", key="screener_liquid"
     )
+    prebreakout = st.toggle(
+        "Show pre-breakout evidence instead of momentum",
+        key="screener_prebreakout",
+        help="Swaps the U/D, extension, 52-week range and 3-month columns for the v2.2 "
+             "contraction, volume dry-up, pivot distance and trend-template columns.",
+    )
 
     view = DATA.copy()
+    if preset and preset != "None":
+        description, predicate = SCREENER_PRESETS[preset]
+        try:
+            view = predicate(view)
+        except KeyError:
+            # A preset reading v2.2 fields against a v2.1 snapshot.
+            view = view.iloc[0:0]
+            description += " — unavailable until the audit republishes with v2.2 fields."
+        write(f'<div class="ws-note" style="margin:2px 0 8px">{ui.esc(description)}</div>')
     if industry != "All":
         view = view[view["Industry"].astype(str) == industry]
     if stages and stages != "All stages":
@@ -485,7 +548,21 @@ def page_screener() -> None:
         f"stocks · sorted by {ui.esc(sort_label.lower())} · Action is the guide interpretation of the "
         "evidence to its left, never a substitute for it.</div>"
     )
-    write(ui.screener_table(window, cached_sparklines(), sorted_by=sort_key))
+    columns = (
+        ("symbol", "trend", "rs", "stage", "action",
+         "rsline", "contraction", "dryup", "pivot", "template")
+        if prebreakout
+        else None
+    )
+    write(ui.screener_table(window, cached_sparklines(), columns=columns, sorted_by=sort_key))
+    st.download_button(
+        "Download these results (CSV)",
+        view.to_csv(index=False).encode("utf-8"),
+        file_name="rs-stages-screener.csv",
+        mime="text/csv",
+        key="screener_csv",
+        help=f"All {total:,} filtered rows, not just this page.",
+    )
     if cached_panel()[0] is None:
         st.write("")
         missing("panel")
@@ -998,6 +1075,11 @@ def page_stock() -> None:
     write('<div class="ws-eyebrow" style="margin-bottom:8px">Every signal against its threshold</div>')
     write(ui.threshold_table(signal_card.signal_rows(row)))
 
+    # v2.2 — the pre-breakout structure. Deliberately its own block below the
+    # threshold table: these fields describe what has *not* happened yet, and
+    # mixing them into the evidence for the current Action would blur the two.
+    _prebreakout_section(row)
+
     # The remaining locked fields the Action spec requires exposed, grouped by
     # the measure each belongs to rather than dumped as one flat list.
     st.write("")
@@ -1061,6 +1143,90 @@ def page_stock() -> None:
         "replaces or hides it. Stage describes where price sits against its own 30-week line. "
         "Relative strength describes how the stock ranks against the rest of the universe. A "
         "stock can turn up structurally while still lagging, and the card says so.</div>"
+    )
+
+
+def _prebreakout_section(row: pd.Series) -> None:
+    """v2.2 §4.1, §5.1, §10.4-10.6, §11.1 for one stock.
+
+    Rendered only when the snapshot actually carries these fields. A snapshot
+    published before v2.2 shows nothing here rather than a grid of em dashes,
+    which would suggest the stock lacks the structure rather than the audit
+    lacking the columns.
+    """
+    if not SNAP.has("Contraction_Ratio", "Trend_Template_Score"):
+        return
+
+    st.write("")
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Before the move — v2.2</div>')
+
+    def num(value, suffix="", digits=2, absent="—"):
+        v = pd.to_numeric(value, errors="coerce")
+        return absent if pd.isna(v) else f"{v:,.{digits}f}{suffix}"
+
+    ratio = pd.to_numeric(row.get("Contraction_Ratio"), errors="coerce")
+    dryup = pd.to_numeric(row.get("Volume_DryUp"), errors="coerce")
+    to_pivot = pd.to_numeric(row.get("Pct_To_Pivot"), errors="coerce")
+    score = pd.to_numeric(row.get("Trend_Template_Score"), errors="coerce")
+    readiness = pd.to_numeric(row.get("Stage1_Readiness"), errors="coerce")
+
+    cards = [
+        ui.evidence_card(
+            "Relative strength line",
+            [
+                (
+                    "Leading price",
+                    "Yes — new high before price" if bool(row.get("RS_Line_NH_Before_Price"))
+                    else ("At its high" if bool(row.get("RS_Line_At_High")) else "No"),
+                    "good" if bool(row.get("RS_Line_NH_Before_Price")) else "neutral",
+                ),
+                ("RS line", num(row.get("RS_Line"), digits=4), "neutral"),
+                ("52-week RS line high", num(row.get("RS_Line_High_52W"), digits=4), "neutral"),
+            ],
+        ),
+        ui.evidence_card(
+            "Contraction and volume",
+            [
+                ("Range vs base start", num(ratio, "×"),
+                 "good" if pd.notna(ratio) and ratio <= 0.60 else "neutral"),
+                ("Volume dry-up", num(dryup, "×"),
+                 "good" if pd.notna(dryup) and dryup <= 0.80 else "neutral"),
+                ("Successive contractions", num(row.get("VCP_Contractions"), digits=0), "neutral"),
+                ("ATR", num(row.get("ATR_Pct"), "%", 1), "neutral"),
+                ("Setup", "Yes" if bool(row.get("VCP_Setup")) else "No",
+                 "good" if bool(row.get("VCP_Setup")) else "neutral"),
+            ],
+        ),
+        ui.evidence_card(
+            "Pivot and template",
+            [
+                ("Base pivot", num(row.get("VCP_Pivot")), "neutral"),
+                (
+                    "Distance to pivot",
+                    "Through it" if pd.notna(to_pivot) and to_pivot <= 0 else num(to_pivot, "%", 1),
+                    "good" if pd.notna(to_pivot) and to_pivot <= 3.0 else "neutral",
+                ),
+                (
+                    "Trend template",
+                    "—" if pd.isna(score) else f"{int(score)} of 8",
+                    "good" if pd.notna(score) and score == 8 else "neutral",
+                ),
+                (
+                    "Stage 1 readiness",
+                    "Not applicable" if pd.isna(readiness) else f"{int(readiness)} of 5",
+                    "good" if pd.notna(readiness) and readiness >= 4 else "neutral",
+                ),
+            ],
+        ),
+    ]
+    write(ui.evidence_grid(cards))
+    write(
+        '<div class="ws-note" style="margin:10px 0 0">None of these is a decision rule. '
+        "No Stage, RS ranking, breakout test or Action label reads any field in this block, "
+        "and a Stage 1 stock scoring 5 of 5 still carries the Stage 1 action. "
+        "<b style=\"color:var(--ink)\">The trend-template thresholds are provisional</b> — "
+        "transcribed from the published template and awaiting verification against the source "
+        "text, as recorded in §5.1.</div>"
     )
 
 
@@ -1138,6 +1304,23 @@ def page_methodology() -> None:
             "remapped. There is no F&O filter.",
         ),
         (
+            "Before the move — v2.2",
+            "Everything else on this site measures what has already happened: a breakout is "
+            "confirmed after it breaks out. Locked-spec v2.2 adds the structure that precedes "
+            "it, sourced from Minervini alongside Weinstein and O'Neil rather than invented. "
+            "The RS line is Close ÷ Nifty 500 on the sessions both actually traded; when it "
+            "reaches a 52-week high while price is still 5% or more below its own, relative "
+            "strength is leading price — O'Neil's tell. Contraction splits the 50-session base "
+            "into five blocks and compares the last block's high-low range against the first; "
+            "volume dry-up compares the last ten sessions against the fifty before them, which "
+            "is the opposite instrument to the volume ratio used for breakouts. The pivot is "
+            "the base's highest high. Stage 1 readiness counts five conditions so the largest "
+            "and most undifferentiated bucket can be ranked. None of it is a decision rule: no "
+            "Stage, RS ranking, breakout test or Action label reads any v2.2 field. "
+            "The Minervini trend-template thresholds are provisional — transcribed from the "
+            "published template and awaiting verification against the source text.",
+        ),
+        (
             "Information boundary",
             "Decisions are pre-market for the upcoming session. For decision session D only information "
             "through the latest completed NSE session T may be used; no upcoming or incomplete session "
@@ -1187,9 +1370,9 @@ def page_methodology() -> None:
             "Timing warnings",
             "Extended is close above 1.20 × the 30-week line. Below-50DMA is close under the 50 "
             "completed-session average. Both are timing warnings that gate the Action; neither "
-            "reclassifies Stage. The guide's pullback-with-volume-drying condition is deliberately "
-            "not implemented: the repository has no validated quantitative definition for it, so no "
-            "detector is fabricated.",
+            "reclassifies Stage. The guide's pullback-with-volume-drying condition was held open "
+            "through v2.1 for want of a precise definition; v2.2 closes it by sourcing the "
+            "concept from Minervini rather than inventing one. See \u201cBefore the move\u201d above.",
         ),
         (
             "The Action layer",
@@ -1241,8 +1424,139 @@ def page_methodology() -> None:
     )
 
 
+# --- Setups -----------------------------------------------------------------
+#: v2.2 §4.1, §10.5, §10.6, §11.1. Every other view answers "what has already
+#: happened"; this one answers "what is coiling". They are different questions
+#: and the evidence columns differ accordingly.
+SETUP_SORTS = {
+    "Readiness (best first)": ("Stage1_Readiness", False),
+    "Closest to pivot": ("Pct_To_Pivot", True),
+    "Tightest contraction": ("Contraction_Ratio", True),
+    "Driest volume": ("Volume_DryUp", True),
+    "RS (high to low)": ("RS_Score", False),
+}
+
+
+def page_setups() -> None:
+    heading(
+        "Setups",
+        "Stocks that have not moved yet. Every other view ranks what the market has already "
+        "done; this one ranks the evidence that precedes it — relative strength leading price, "
+        "a contracting range, drying volume, and distance still to travel to the pivot.",
+    )
+
+    if missing("v22_fields"):
+        return
+
+    view = DATA.copy()
+    total_universe = len(view)
+
+    groups = st.segmented_control(
+        "Setup",
+        ["RS leading price", "Contracting base", "Stage 1 ready", "All"],
+        default="RS leading price",
+        key="setups_group",
+    )
+    row = st.columns([2, 2, 2])
+    sort_label = row[0].selectbox("Sort by", list(SETUP_SORTS), key="setups_sort")
+    industries = ["All"] + sorted(DATA["Industry"].dropna().astype(str).unique().tolist())
+    industry = row[1].selectbox("Industry", industries, key="setups_industry")
+    liquid_only = row[2].toggle(
+        "Liquid only", value=True, key="setups_liquid",
+        help="20-session traded value above ₹5 Cr. On by default here: a base that cannot be "
+             "bought in size is not an opportunity.",
+    )
+
+    explain = {
+        "RS leading price": (
+            "Relative strength at a 52-week high while price is at least 5% below its own. "
+            "O'Neil's leading tell: the stock is outperforming from inside its base.",
+            lambda f: f[f["RS_Line_NH_Before_Price"].fillna(False).astype(bool)],
+        ),
+        "Contracting base": (
+            "Range tightening to 0.60× or less across the 50-session base, volume drying to "
+            "0.80× or less, and at least two successive contractions. Minervini's pattern; "
+            "the detector is ours, stated in §10.5.",
+            lambda f: f[f["VCP_Setup"].fillna(False).astype(bool)],
+        ),
+        "Stage 1 ready": (
+            "Stage 1 stocks scoring 4 or 5 of the readiness count: the decline has stopped, "
+            "RS is no longer lagging, the range is tightening, volume is drying and the "
+            "10-week line has been reclaimed.",
+            lambda f: f[pd.to_numeric(f["Stage1_Readiness"], errors="coerce") >= 4],
+        ),
+        "All": (
+            "The whole validated universe with the pre-breakout evidence columns, unfiltered.",
+            lambda f: f,
+        ),
+    }
+    label = groups if groups in explain else "RS leading price"
+    description, predicate = explain[label]
+
+    if liquid_only and "Liquid_UI_Filter" in view.columns:
+        view = view[view["Liquid_UI_Filter"].fillna(False).astype(bool)]
+    if industry != "All":
+        view = view[view["Industry"].astype(str) == industry]
+    view = predicate(view)
+
+    column, ascending = SETUP_SORTS[sort_label]
+    if column in view.columns:
+        sortable = view[pd.to_numeric(view[column], errors="coerce").notna()]
+        unsortable = view[pd.to_numeric(view[column], errors="coerce").isna()]
+        view = pd.concat(
+            [sortable.sort_values(column, ascending=ascending), unsortable]
+        )
+
+    write(f'<div class="ws-note" style="margin:2px 0 10px">{ui.esc(description)}</div>')
+
+    if view.empty:
+        write(
+            ui.missing_notice(
+                f"No stock currently matches “{ui.esc(label)}”.",
+                "This is a real reading of today's snapshot, not a missing artifact: the "
+                f"condition was evaluated across all {total_universe:,} constituents and none "
+                "met it. Setups of this kind are intermittent by nature — a market with no "
+                "coiling leaders is information, not an error.",
+            )
+        )
+        return
+
+    write(
+        f'<div class="ws-note" style="margin:2px 0 10px"><b style="color:var(--ink)">{len(view):,}</b> '
+        f"of {total_universe:,} constituents · sorted by {ui.esc(sort_label.lower())}</div>"
+    )
+    write(
+        ui.screener_table(
+            view.head(PAGE_SIZE), cached_sparklines(), columns=ui.SETUP_COLUMNS
+        )
+    )
+    if len(view) > PAGE_SIZE:
+        with st.expander(f"The remaining {len(view) - PAGE_SIZE:,}"):
+            write(
+                ui.screener_table(
+                    view.iloc[PAGE_SIZE:], cached_sparklines(), columns=ui.SETUP_COLUMNS
+                )
+            )
+
+    st.download_button(
+        "Download this list (CSV)",
+        view.to_csv(index=False).encode("utf-8"),
+        file_name=f"rs-stages-setups-{label.lower().replace(' ', '-')}.csv",
+        mime="text/csv",
+        key="setups_csv",
+    )
+
+    write(
+        '<div class="ws-note" style="margin:14px 0 0">A setup is not a signal. None of these '
+        "conditions is a locked Action input: every stock above still carries whatever Action "
+        "its Stage, RS and volume produced, and Stage 1 remains Stage 1 however ready its base "
+        "looks. This view ranks what to watch, not what to buy.</div>"
+    )
+
+
 PAGES = {
     "Dashboard": page_dashboard,
+    "Setups": page_setups,
     "Screener": page_screener,
     "Industries": page_industries,
     "Market": page_market,
