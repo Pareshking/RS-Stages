@@ -697,3 +697,82 @@ def contraction_depths(
         if kind == "H" and next_kind == "L" and peak > 0:
             out.append((stamp, (peak - trough) / peak * 100.0))
     return out
+
+
+#: §10.5.1 — the base runs 3 to 65 weeks. Outside that the structure is not a
+#: VCP: too short has not digested supply, too long has stopped being a pause.
+VCP_MIN_BASE_WEEKS = 3
+VCP_MAX_BASE_WEEKS = 65
+
+
+def vcp_footprint(
+    high: pd.Series,
+    low: pd.Series,
+    end: pd.Timestamp,
+    threshold_pct: float = SWING_REVERSAL_PCT,
+) -> dict:
+    """§10.5.1 — the base's technical footprint, in the source's own terms.
+
+    Returns ``Base_Weeks``, ``Deepest_Pct``, ``Tightest_Pct``, ``Contractions``
+    and ``VCP_Pivot``, or an all-unavailable dict when no base qualifies.
+
+    The base begins at the absolute high the stock came off — not at a fixed
+    number of sessions back. That single change is what §10.5 got most wrong:
+    a window fixed at ten weeks cannot represent a six-week base or a
+    forty-week one, and the source's own worked examples span both.
+
+    The pivot is the high that opens the final, tightest contraction. It is not
+    the highest point of the base, which is where the base *started*.
+    """
+    absent = {
+        "Base_Weeks": float("nan"),
+        "Deepest_Pct": float("nan"),
+        "Tightest_Pct": float("nan"),
+        "Contractions": 0,
+        "VCP_Pivot": float("nan"),
+    }
+
+    h = high.sort_index().astype(float)
+    l = low.sort_index().astype(float)
+    h, l = h.align(l, join="inner")
+    stop = pd.Timestamp(end)
+    start = stop - pd.Timedelta(weeks=VCP_MAX_BASE_WEEKS)
+    h, l = h.loc[(h.index > start) & (h.index <= stop)], l.loc[(l.index > start) & (l.index <= stop)]
+    if len(h) < 2:
+        return dict(absent)
+
+    swings = swing_points(h, l, threshold_pct)
+    peaks = [(stamp, price) for stamp, price, kind in swings if kind == "H"]
+    if not peaks:
+        return dict(absent)
+
+    # The absolute high the stock comes off opens the base.
+    base_start, _ = max(peaks, key=lambda pair: pair[1])
+    weeks = (stop - base_start).days / 7.0
+    if not (VCP_MIN_BASE_WEEKS <= weeks <= VCP_MAX_BASE_WEEKS):
+        return dict(absent)
+
+    within = [s for s in swings if s[0] >= base_start]
+    depths = contraction_depths(within)
+    if not depths:
+        return dict(absent)
+
+    peak_at, tightest = depths[-1]
+    peak_price = next((p for stamp, p, k in within if stamp == peak_at and k == "H"), float("nan"))
+    return {
+        "Base_Weeks": float(weeks),
+        "Deepest_Pct": float(max(d for _, d in depths)),
+        "Tightest_Pct": float(tightest),
+        "Contractions": int(len(depths)),
+        "VCP_Pivot": float(peak_price),
+    }
+
+
+def footprint_label(fp: dict) -> str:
+    """Render a footprint the way the source writes it: ``40W 31/3 4T``."""
+    weeks, deep, tight = fp.get("Base_Weeks"), fp.get("Deepest_Pct"), fp.get("Tightest_Pct")
+    if not all(np.isfinite(float(v)) for v in (weeks, deep, tight) if v is not None):
+        return "—"
+    if any(v is None for v in (weeks, deep, tight)):
+        return "—"
+    return f"{round(weeks)}W {round(deep)}/{round(tight)} {int(fp['Contractions'])}T"

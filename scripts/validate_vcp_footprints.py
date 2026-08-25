@@ -1,0 +1,121 @@
+"""Check the v2.3 detector against footprints published in the source.
+
+The source records a handful of bases in its own shorthand — weeks, deepest
+correction, tightest correction, contraction count. Two of those stocks are
+still listed with history covering the period, so the detector can be measured
+against a reading made by the method's author rather than against our own
+fixtures.
+
+This cannot run in the development sandbox: Yahoo is unreachable there. It runs
+on a CI runner, which has the same network access the nightly audit uses.
+
+The breakout dates in the source are given to the month, so rather than guess a
+session this scans candidate decision dates across the month and reports the
+footprint at each. A match on any session in the stated month is a pass; the
+source's reader was looking at a chart, not a specific close.
+"""
+from __future__ import annotations
+
+import sys
+
+import pandas as pd
+
+from rs_stages.data import download_yfinance_history, normalize_session_index
+from rs_stages.quant import footprint_label, vcp_footprint
+
+#: symbol -> (breakout month per the source, expected footprint)
+CASES = {
+    "MELI": ("2007-12", {"weeks": 6, "deepest": 32, "tightest": 6, "contractions": 3}),
+    "NFLX": ("2009-10", {"weeks": 27, "deepest": 27, "tightest": 7, "contractions": 3}),
+}
+
+#: How far a computed figure may sit from the source's and still count. Its
+#: numbers were read off a chart by eye, so demanding exactness would be
+#: measuring the wrong thing — but a wide tolerance would let anything pass.
+TOL = {"weeks": 3.0, "deepest": 5.0, "tightest": 3.0, "contractions": 1}
+
+
+def fetch(symbol: str, month: str) -> pd.DataFrame:
+    """Daily history spanning the base and its breakout."""
+    stop = pd.Timestamp(month) + pd.offsets.MonthEnd(1)
+    start = stop - pd.Timedelta(weeks=90)          # 65-week base plus headroom
+    import yfinance as yf
+
+    frame = yf.download(
+        symbol, start=start, end=stop + pd.Timedelta(days=5),
+        auto_adjust=True, progress=False, actions=False,
+    )
+    if frame is None or frame.empty:
+        raise ValueError(f"no history for {symbol}")
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = frame.columns.get_level_values(0)
+    return normalize_session_index(frame)
+
+
+def main() -> None:
+    failures: list[str] = []
+    for symbol, (month, want) in CASES.items():
+        label = f"{want['weeks']}W {want['deepest']}/{want['tightest']} {want['contractions']}T"
+        print(f"\n=== {symbol} — source footprint {label}, breakout {month} ===")
+        try:
+            data = fetch(symbol, month)
+        except Exception as exc:                      # noqa: BLE001
+            failures.append(f"{symbol}: fetch failed ({type(exc).__name__}: {exc})")
+            print(f"  FETCH FAILED: {exc}")
+            continue
+
+        sessions = [d for d in data.index if str(d)[:7] == month]
+        print(f"  {len(data)} sessions fetched; scanning {len(sessions)} in {month}")
+
+        best, best_score = None, None
+        for t in sessions:
+            fp = vcp_footprint(data["High"], data["Low"], t)
+            if not pd.notna(fp["Base_Weeks"]):
+                continue
+            score = (
+                abs(fp["Base_Weeks"] - want["weeks"])
+                + abs(fp["Deepest_Pct"] - want["deepest"])
+                + abs(fp["Tightest_Pct"] - want["tightest"])
+                + abs(fp["Contractions"] - want["contractions"]) * 3
+            )
+            if best_score is None or score < best_score:
+                best, best_score = (t, fp), score
+
+        if best is None:
+            failures.append(f"{symbol}: detector found no qualifying base in {month}")
+            print("  NO BASE FOUND in the stated month")
+            continue
+
+        t, fp = best
+        print(f"  closest session {t.date()} -> {footprint_label(fp)}")
+        print(
+            f"    weeks {fp['Base_Weeks']:.1f} (want {want['weeks']})  "
+            f"deepest {fp['Deepest_Pct']:.1f} (want {want['deepest']})  "
+            f"tightest {fp['Tightest_Pct']:.1f} (want {want['tightest']})  "
+            f"contractions {fp['Contractions']} (want {want['contractions']})"
+        )
+        for key, got in (
+            ("weeks", fp["Base_Weeks"]),
+            ("deepest", fp["Deepest_Pct"]),
+            ("tightest", fp["Tightest_Pct"]),
+            ("contractions", fp["Contractions"]),
+        ):
+            if abs(got - want[key]) > TOL[key]:
+                failures.append(
+                    f"{symbol}: {key} {got:.1f} vs source {want[key]} "
+                    f"(tolerance {TOL[key]})"
+                )
+
+    print("\n" + "=" * 62)
+    if failures:
+        print("MISMATCHES — the detector disagrees with the source's reading:")
+        for f in failures:
+            print(f"  - {f}")
+        print("\nThis is information, not necessarily a defect: the source read")
+        print("these off charts by eye. Report it; do not widen TOL to make it pass.")
+        sys.exit(1)
+    print("Detector reproduces every source footprint within tolerance.")
+
+
+if __name__ == "__main__":
+    main()
