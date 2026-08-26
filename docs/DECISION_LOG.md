@@ -392,3 +392,38 @@ contraction's high, so `Pct_To_Pivot` overstates the distance and errs toward
 caution. A test asserts the recovery detector stays out of the published pivot,
 and a second pins the failure so a sixth attempt starts from evidence rather
 than from this prose.
+
+### D-2.2.8 — A snapshot's date can split across the universe, and now says so
+
+The header showed one "Validated snapshot" date, computed as the max of a
+per-symbol `Date` column. That column is each symbol's own latest completed
+session, not a shared clock, and the price provider updates its feed
+asynchronously — larger, more liquid names first. The header's max silently
+credited every symbol with the newest date present, whether or not that
+symbol actually reflected it.
+
+Found by direct request, not by routine checking: asked to manually re-run
+the audit and check whether 25 Aug had arrived, the naive check (one row) said
+no; the full distribution said 445 of 750 symbols had already moved to 25 Aug
+while 305 had not, split cleanly along liquidity — the lagging group's median
+20-session traded value was roughly a third of the leading group's. Five
+specific lagging symbols (NETWEB, TVSMOTOR, GVT&D, GRASIM, NAVINFLUOR) were
+verified by hand against the live provider before concluding this was the
+provider's own lag rather than a defect in our fetch.
+
+The fix is disclosure, not enforcement. Waiting for every symbol to agree
+before publishing was considered and rejected: one thin, illiquid name could
+then delay the other 749 indefinitely, and a stale-but-honest snapshot is
+worse than a mostly-current one that says exactly which part is behind.
+`Snapshot.date_coverage` computes the split; the header stamp and a Dashboard
+card disclose it whenever it is not unanimous, naming every lagging symbol and
+the session each is actually on. Each lagging row stays internally consistent
+for its own date — nothing is fabricated to paper over the gap — but a
+cross-sectional ranking comparing it to a same-day peer is comparing two
+different sessions, and the disclosure says so rather than leaving that
+inference to the reader.
+
+Tests pin both directions: the disclosure appears exactly when the file on
+disk is split, and never appears as a false alarm when it is not — computed
+adaptively from whatever `data/latest_research.csv` currently holds, so the
+test does not freeze one night's counts.

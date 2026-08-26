@@ -608,6 +608,10 @@ def main() -> None:
     print(f"Yahoo history: {start.date()} to {end.date()} exclusive")
     print(f"Universe rows after DUMMY exclusion: {len(universe)}")
     print(f"Research rows: {len(result)}")
+    date_counts = pd.to_datetime(result["Date"], errors="coerce").dt.normalize().value_counts()
+    if len(date_counts) > 1:
+        breakdown = ", ".join(f"{d.date()}={n}" for d, n in date_counts.sort_index(ascending=False).items())
+        print(f"Date split across the universe (provider lag, not an error): {breakdown}")
     print(f"Independent checks: stage={checked_stage}, high52={checked_high}, volume={checked_volume}, ud={checked_ud}, liquidity={checked_liquidity}")
     print(f"Independent checks (v2.1): ma10w={checked_ma_10w}, low52={checked_low}, trend_panel={checked_trend}")
     print(

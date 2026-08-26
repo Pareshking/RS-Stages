@@ -63,6 +63,45 @@ REGENERATE_HINT = (
 
 
 @dataclass
+class DateCoverage:
+    """How the universe splits across information dates within one snapshot.
+
+    ``Date`` is set per symbol from that symbol's own latest completed session
+    (screener.py), not from one shared clock. The provider updates its feed
+    asynchronously — larger, more liquid names first — so on any given run a
+    fraction of the universe can still carry the previous session while the
+    rest has moved on. 24-25 Aug 2026 split roughly 305/445 this way, with the
+    lagging group's median 20-session traded value about a third of the
+    leading group's: a liquidity effect, not a random one.
+
+    This is not corrected by waiting for the slowest symbol before publishing,
+    which is a defect of a different, worse kind: one thin, illiquid stock
+    could then hold back the other 749 indefinitely. It is corrected by never
+    describing a split universe as one date.
+    """
+
+    latest: pd.Timestamp | None
+    counts: dict[pd.Timestamp, int]
+
+    @property
+    def is_split(self) -> bool:
+        return len(self.counts) > 1
+
+    @property
+    def current_count(self) -> int:
+        return self.counts.get(self.latest, 0) if self.latest is not None else 0
+
+    @property
+    def lagging_count(self) -> int:
+        return sum(self.counts.values()) - self.current_count
+
+    @property
+    def lagging_pct(self) -> float:
+        total = sum(self.counts.values())
+        return (self.lagging_count / total * 100.0) if total else 0.0
+
+
+@dataclass
 class Snapshot:
     """Everything the UI is allowed to read, plus what is missing and why."""
 
@@ -76,6 +115,14 @@ class Snapshot:
     def decision_date(self) -> pd.Timestamp | None:
         stamp = pd.to_datetime(self.research.get("Date"), errors="coerce").max()
         return None if pd.isna(stamp) else stamp
+
+    @property
+    def date_coverage(self) -> DateCoverage:
+        dates = pd.to_datetime(self.research.get("Date"), errors="coerce").dropna()
+        if dates.empty:
+            return DateCoverage(latest=None, counts={})
+        counts = dates.dt.normalize().value_counts().to_dict()
+        return DateCoverage(latest=dates.max().normalize(), counts=counts)
 
     @property
     def previous_date(self) -> pd.Timestamp | None:

@@ -132,6 +132,26 @@ if "industry_pick" not in st.session_state:
 
 # --- header -----------------------------------------------------------------
 decision = SNAP.decision_date
+coverage = SNAP.date_coverage
+
+# Date is set per symbol from that symbol's own latest completed session, not
+# a shared clock (screener.py) — the provider updates its feed asynchronously,
+# larger names first, so a fraction of the universe can lag by one session on
+# any given run. decision_date is the newest date present; the stamp must not
+# let that read as every symbol's date when it is not.
+if coverage.is_split:
+    stamp_detail = (
+        f'<span style="color:var(--faint);font-weight:500">· Nifty Total Market '
+        f'({len(SNAP.universe):,}) · {ui.dot("#B5781A", size=6)} '
+        f'<span style="color:#B5781A">{coverage.current_count:,} of '
+        f'{len(SNAP.universe):,} as of this date, {coverage.lagging_count:,} '
+        f'one session behind (provider lag)</span></span>'
+    )
+else:
+    stamp_detail = (
+        f'<span style="color:var(--faint);font-weight:500">· Nifty Total Market '
+        f'({len(SNAP.universe):,})</span>'
+    )
 write(
     '<div class="ws-header"><div class="ws-header-inner">'
     '<a class="ws-brand" target="_self" href="?view=Dashboard">'
@@ -139,8 +159,7 @@ write(
     '<div class="ws-tagline">Relative strength · stages · guide actions</div></span></a>'
     f'<div class="ws-stamp">{ui.dot(POSITIVE)}Validated snapshot '
     f'<span class="num" style="color:var(--ink)">{fmt_date(decision)}</span>'
-    f'<span style="color:var(--faint);font-weight:500">· Nifty Total Market '
-    f'({len(SNAP.universe):,})</span></div></div></div>'
+    f'{stamp_detail}</div></div></div>'
 )
 
 st.write("")
@@ -257,6 +276,38 @@ def page_dashboard() -> None:
         "since the previous completed session, and where names sit today. This page orients; "
         "the Screener selects.",
     )
+
+    coverage = SNAP.date_coverage
+    if coverage.is_split:
+        lagging = DATA[
+            pd.to_datetime(DATA["Date"], errors="coerce").dt.normalize() != coverage.latest
+        ].copy()
+        lagging["Date"] = pd.to_datetime(lagging["Date"]).dt.strftime("%d %b")
+        lagging = lagging.sort_values("Symbol")
+        items = list(zip(lagging["Symbol"], lagging["Date"]))
+        write(
+            ui.card(
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+                f'{ui.dot("#B5781A", size=8)}<div class="ws-eyebrow" style="margin:0;color:#B5781A">'
+                "Not every stock is on today's close</div></div>"
+                f'<div class="ws-note" style="margin-bottom:10px">'
+                f"The price provider updates its feed asynchronously — larger, more liquid names "
+                f"first. <strong>{coverage.current_count:,} of {len(DATA):,}</strong> stocks reflect "
+                f"{fmt_date(coverage.latest)}; <strong>{coverage.lagging_count:,}</strong> "
+                f"({coverage.lagging_pct:.0f}%) still carry their prior session, listed below with "
+                f"the date each is actually on. Every field for a lagging stock is internally "
+                f"consistent for its own date — nothing here is fabricated — but a ranking that "
+                f"compares it to a same-day peer is comparing two different sessions. This is not "
+                f"withheld: waiting for every stock to agree would let one thin name delay the "
+                f"other {len(DATA) - 1:,}."
+                "</div>"
+                + ui.pill_row(items[:25])
+            )
+        )
+        if len(items) > 25:
+            with st.expander(f"{len(items) - 25:,} more lagging symbols"):
+                write(ui.pill_row(items[25:]))
+        st.write("")
 
     write(regime_card())
     st.write("")

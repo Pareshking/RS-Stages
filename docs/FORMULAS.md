@@ -30,6 +30,23 @@ Whenever methodology says "current day/session included", this means **the lates
 
 This is a global look-ahead-bias control.
 
+**`T` is resolved per symbol, not from one shared clock.** It is the latest
+session *that symbol's own history* carries a Close for (§ build_decision_snapshot
+in `rs_stages/data.py`), because the price provider updates its feed
+asynchronously — larger, more liquid names first. A run can therefore publish
+a universe where most symbols' `T` is one session ahead of a lagging minority's.
+Found on the run of 26 Aug 2026: 445 of 750 symbols carried 25 Aug while 305,
+whose median liquidity was roughly a third of the leading group's, still
+carried 24 Aug.
+
+Each lagging symbol's own row stays internally consistent for its own `T` —
+nothing is fabricated to paper over the gap. What must never happen is
+presenting the split universe as one date: `Snapshot.date_coverage`
+(`rs_stages/ui/loaders.py`) computes the split and the terminal discloses it
+whenever it is not unanimous, both on the header stamp and as a listed count on
+the Dashboard. Waiting for every symbol to agree before publishing is not the
+fix — one thin, illiquid name could then hold up the other 749 indefinitely.
+
 ### 1.3 Dates
 
 All major lookback definitions are calendar-date based unless explicitly stated otherwise.
