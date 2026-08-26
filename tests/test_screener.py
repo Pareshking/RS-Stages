@@ -5,6 +5,7 @@ from rs_stages.data import DecisionSnapshot
 from rs_stages.screener import (
     TREND_COLUMNS,
     TREND_HEALTH_CONDITIONS,
+    TREND_TEMPLATE_CONDITIONS,
     analyze_universe,
     analyze_universe_with_trend,
 )
@@ -103,6 +104,22 @@ def test_trend_health_equals_the_count_of_its_five_conditions():
         expected = sum(bool(row[field]) for field, _ in TREND_HEALTH_CONDITIONS)
         assert row["Trend_Health"] == expected
         assert 0 <= row["Trend_Health"] <= 5
+
+
+def test_trend_template_conditions_cover_exactly_the_eight_tt_fields():
+    """The Stock-page checklist reads this tuple; it must name all eight."""
+    fields = [field for field, _ in TREND_TEMPLATE_CONDITIONS]
+    assert fields == [
+        "TT1_Above_150_200", "TT2_150_Above_200", "TT3_200_Rising",
+        "TT4_50_Above_150_200", "TT5_Above_50", "TT6_Above_52W_Low",
+        "TT7_Near_52W_High", "TT8_RS",
+    ]
+
+
+def test_exactly_three_trend_template_labels_are_marked_provisional():
+    """TT6-TT8 carry invented thresholds; TT1-TT5 are structural comparisons."""
+    provisional = [label for _, label in TREND_TEMPLATE_CONDITIONS if "provisional" in label]
+    assert len(provisional) == 3
 
 
 def test_trend_collection_does_not_change_any_row_value():

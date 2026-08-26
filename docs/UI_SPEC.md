@@ -66,7 +66,14 @@ The stock page must present, in order:
 3. Stage + RS + RS band.
 4. Breakout/confirmation and timing warnings.
 5. Price + 30W MA interactive chart.
-6. Evidence checklist.
+6. Evidence checklist(s) — every authority with a stated criteria list gets its
+   own itemized checklist, not a collapsed score. Weinstein's trend-health (5
+   conditions) and Minervini's trend template (8 conditions, §5.1) are each
+   rendered with a pass/fail mark per item; a summary count is a
+   supplementary total on top of the itemized list, never a replacement for
+   it. Found missing for the trend template on 26 Aug 2026 — it had only a
+   collapsed "N of 8" figure while trend-health was already itemized — so
+   this is now explicit rather than left to be inferred from one example.
 7. Calculation detail with properly formatted values.
 8. Method/source note.
 

@@ -427,3 +427,41 @@ Tests pin both directions: the disclosure appears exactly when the file on
 disk is split, and never appears as a false alarm when it is not — computed
 adaptively from whatever `data/latest_research.csv` currently holds, so the
 test does not freeze one night's counts.
+
+### D-2.2.9 — The Stock page scored the trend template but never itemized it
+
+Weinstein's trend-health block on the Stock page has always shown its five
+conditions individually, each with a pass/fail mark (`TREND_HEALTH_CONDITIONS`
+in `screener.py`). The Minervini trend template — added later, in v2.2 —
+carried the same eight-criterion structure but was only ever surfaced as one
+collapsed number, "N of 8", inside the pivot evidence card. Asked directly
+whether the page covered Minervini the way it covered the other two
+authorities, checking the actual render found no per-criterion breakdown
+anywhere: a stock scoring 4 of 8 gave no way to see which four passed.
+
+`TREND_TEMPLATE_CONDITIONS` is added beside `TREND_HEALTH_CONDITIONS`, same
+shape, driving the same `ui.checklist()` renderer the trend-health card
+already uses — one code path for both authorities rather than a second,
+divergent implementation. The Stock page gains a "Minervini trend-template
+checklist" card with all eight items and their marks, placed beside the
+existing evidence grid.
+
+Building it surfaced a second, smaller defect in the same area: two footer
+notes said "the trend-template thresholds are provisional" without
+qualification, which reads as all eight when only TT6, TT7 and TT8 carry a
+number invented for this project (the 52-week-low, 52-week-high and RS
+cut-offs); TT1 through TT5 are structural comparisons with nothing to verify.
+Both notes, on the Stock page and in Methodology, now say "three of the
+eight" and name which five carry no invented number. This is the same
+class of imprecision as D-2.2.7 — a true statement that overstates what it
+covers — caught here before it was recorded as a defect rather than after.
+
+UI_SPEC's Stock page requirements now name both checklists explicitly, so an
+authority with a stated criteria list getting a collapsed score instead of an
+itemized breakdown is a spec violation rather than something that has to be
+noticed by inspection a second time.
+
+Tests: three new tests drive the real Stock page against symbols picked
+adaptively from whatever the live snapshot holds — a full pass, a partial
+pass, and the footer wording — plus two new screener-level tests pinning the
+eight field names and the three-of-eight provisional count.

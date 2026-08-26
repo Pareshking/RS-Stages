@@ -22,7 +22,7 @@ from rs_stages.market import breadth_snapshot, industry_leadership
 from rs_stages.movers import rs_movers, transitions
 from rs_stages.quant import ma_10w_series, ma_30w_series
 from rs_stages import signal_card
-from rs_stages.screener import TREND_HEALTH_CONDITIONS
+from rs_stages.screener import TREND_HEALTH_CONDITIONS, TREND_TEMPLATE_CONDITIONS
 from rs_stages.ui import charts
 from rs_stages.ui import components as ui
 from rs_stages.ui import theme
@@ -1271,13 +1271,32 @@ def _prebreakout_section(row: pd.Series) -> None:
         ),
     ]
     write(ui.evidence_grid(cards))
+
+    template_conditions = [
+        (label, bool(row.get(field, False)))
+        for field, label in TREND_TEMPLATE_CONDITIONS
+        if field in row.index
+    ]
+    if template_conditions:
+        met = sum(1 for _, passed in template_conditions if passed)
+        st.write("")
+        write(
+            ui.card(
+                '<div class="ws-card-title" style="display:flex;align-items:center;gap:6px">'
+                "Minervini trend-template checklist"
+                f'<span class="num" style="color:var(--faint);font-weight:600">{met}/8</span></div>'
+                + ui.checklist(template_conditions)
+            )
+        )
+
     write(
         '<div class="ws-note" style="margin:10px 0 0">None of these is a decision rule. '
         "No Stage, RS ranking, breakout test or Action label reads any field in this block, "
         "and a Stage 1 stock scoring 5 of 5 still carries the Stage 1 action. "
-        "<b style=\"color:var(--ink)\">The trend-template thresholds are provisional</b> — "
-        "transcribed from the published template and awaiting verification against the source "
-        "text, as recorded in §5.1.</div>"
+        "<b style=\"color:var(--ink)\">Three of the trend template's eight thresholds are "
+        "provisional</b> — the 52-week-low, 52-week-high and RS cut-offs are transcribed from "
+        "the published template and await verification against NSE history; the other five are "
+        "structural comparisons and carry no invented number, as recorded in §5.1.</div>"
     )
 
 
@@ -1368,8 +1387,10 @@ def page_methodology() -> None:
             "the base's highest high. Stage 1 readiness counts five conditions so the largest "
             "and most undifferentiated bucket can be ranked. None of it is a decision rule: no "
             "Stage, RS ranking, breakout test or Action label reads any v2.2 field. "
-            "The Minervini trend-template thresholds are provisional — transcribed from the "
-            "published template and awaiting verification against the source text.",
+            "Three of the trend template's eight thresholds are provisional — the 52-week-low, "
+            "52-week-high and RS cut-offs are transcribed from the published template and await "
+            "verification against NSE history; the other five are structural comparisons and "
+            "carry no invented number.",
         ),
         (
             "Information boundary",

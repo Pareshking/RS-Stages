@@ -53,6 +53,22 @@ TREND_HEALTH_CONDITIONS = (
     ("RS_Not_Lagging", "Relative strength is not lagging (RS ≥ 50)"),
 )
 
+#: Minervini's eight trend-template conditions (§5.1), in the source's own
+#: order. Five are structural comparisons between locked fields; the last
+#: three carry numeric thresholds transcribed from the source and labelled
+#: provisional in the UI, not retuned or replaced here. See DECISION_LOG
+#: D-2.2.2 and FORMULAS.md's "Trend template" section for the exact values.
+TREND_TEMPLATE_CONDITIONS = (
+    ("TT1_Above_150_200", "Close is above the 150- and 200-session averages"),
+    ("TT2_150_Above_200", "150-session average is above the 200-session average"),
+    ("TT3_200_Rising", "200-session average is rising"),
+    ("TT4_50_Above_150_200", "50-session average is above the 150- and 200-session averages"),
+    ("TT5_Above_50", "Close is above the 50-session average"),
+    ("TT6_Above_52W_Low", "At least 30% above the 52-week low — provisional threshold"),
+    ("TT7_Near_52W_High", "Within 25% of the 52-week high — provisional threshold"),
+    ("TT8_RS", "Relative strength is 70 or better — provisional threshold"),
+)
+
 
 def _analyze_symbol(
     symbol: str,
