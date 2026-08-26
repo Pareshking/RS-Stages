@@ -1097,6 +1097,43 @@ def page_stock() -> None:
         write('<div class="ws-eyebrow" style="margin-bottom:8px">Where the readings interact</div>')
         write(ui.card(interaction_notes))
 
+    # Bottom line — the same Action label and reason already shown in the
+    # ribbon at the top, restated now that all three boxes have been seen.
+    # Nothing new is computed here: it is the one locked decision, quoted
+    # alongside each authority's own conclusion sentence. Minervini's line
+    # is shown for context, not as a vote — action_for() in actions.py never
+    # reads a v2.2 field, so a trend-template pass or a contraction setup
+    # can sit beside any Action label at all, including WAIT or SELL.
+    author_lines = [
+        line
+        for line in [
+            signal_card.weinstein_line(row),
+            signal_card.oneil_line(row),
+            signal_card.minervini_line(row),
+        ]
+        if line
+    ]
+    if author_lines:
+        st.write("")
+        write('<div class="ws-eyebrow" style="margin-bottom:8px">Bottom line</div>')
+        quotes = "".join(
+            f'<div class="ws-note" style="margin-top:6px">{ui.esc(line)}</div>' for line in author_lines
+        )
+        write(
+            ui.card(
+                f'<div class="ws-ribbon" style="background:{action_bg};'
+                f'border:1px solid {action_color}22;margin:0 0 2px">'
+                f'{ui.dot(action_color, 7)}<span style="font-weight:800;color:{action_color};'
+                f'font-size:14px">{ui.esc(action)}</span>'
+                f'<span style="color:var(--sub)">{ui.esc(row.get("Action_Reason", ""))}</span></div>'
+                + quotes
+                + '<div class="ws-note" style="margin-top:10px">Action is Weinstein\'s stage gated by '
+                "O'Neil's strength and volume — the two authorities whose evidence decides it. "
+                "Minervini's reading above is context, not a vote: no Stage, RS ranking, breakout "
+                "test or Action label reads a v2.2 field.</div>"
+            )
+        )
+
     # The remaining locked fields the Action spec requires exposed, grouped by
     # the measure each belongs to rather than dumped as one flat list.
     st.write("")

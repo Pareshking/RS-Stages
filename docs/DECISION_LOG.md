@@ -524,3 +524,53 @@ the live snapshot confirming all three boxes render, the old flat sections
 are gone, the RS-line evidence is no longer inside Minervini's section, the
 interaction notes appear only when there is something to say, and a
 five-symbol sample renders every box without exception.
+
+### D-2.2.11 — A closing "Bottom line" card, and why it restates rather than recomputes
+
+Asked for an overall conclusion card synthesizing the three author boxes —
+described as "basically an action card." Two designs were on the table: a
+new combined score (e.g. counting how many of the three authorities agree),
+or restating the existing Action label as a closing summary once all three
+boxes have been read.
+
+The combined-score design was examined first because it was the one
+initially chosen, and rejecting it surfaced something worth recording in its
+own right: `action_for()` (`rs_stages/actions.py`) already synthesizes
+Weinstein (Stage, as the gate) and O'Neil (RS, U/D, breakout, extension) —
+Minervini reads nothing, by the design recorded when v2.2 shipped. A "3 of 3
+agree" tally would therefore not be a new reading of the same evidence; it
+would need an invented weight for how much Minervini's template or
+contraction setup should count, which is exactly the kind of undefined
+number this project refuses to introduce. Worse, it would sit on the page
+as a second verdict that need not agree with the locked Action — Action
+could read WAIT while a naive tally read "2 of 3 bullish" — which
+reintroduces the confusion the whole three-box redesign (D-2.2.10) was
+built to remove.
+
+Separately, a live report of zero BUY/BUY★ across the entire 750-symbol
+universe for two consecutive sessions was investigated in full before any
+of this was built, in case the finding was itself evidence of a defect. It
+is not. The funnel step-by-step: 410 Stage 2, 143 also RS >= 80, 133 also
+clear of distribution, 31 also not extended — the point of collapse — 23
+also above the 50-session average, 0 also breaking out today. Every RS>=80
+stock currently breaking out is 22-44% above its 30-week line, meaning the
+market's strongest performers have already made their move. PTCIL was
+BUY* on 21 Aug at 18.2% extension; by 25 Aug, still breaking out with RS
+improved 84->87, its extension crossed to 24.0% and Action correctly
+flipped to WAIT — the extension gate (locked, predating this session)
+working exactly as specified, not a defect.
+
+The closing card restates rather than recomputes. It reuses
+`row.get("Action")` and `row.get("Action_Reason")` verbatim, and quotes
+`weinstein_line`, `oneil_line` and `minervini_line` — the same three
+functions the boxes already call — omitting any authority with nothing to
+say. Minervini's line is explicitly labelled context, not a vote. ABB is
+the clean illustration on the live snapshot: Trend_Template_Score 8/8,
+Action HOLD, both shown side by side without contradiction, because the
+card never claims Minervini's evidence decided anything.
+
+Tests: 349 passing, 4 new — the card is checked to reproduce the same
+Action already shown at the top, ABB's 8/8-yet-HOLD case is pinned by
+name, the "not a vote" wording is asserted present, and all three line
+functions are confirmed to return empty strings together on a row with no
+classifiable evidence at all.

@@ -106,3 +106,50 @@ def test_no_exception_across_a_sample_of_symbols():
         at.query_params["symbol"] = symbol
         at.run()
         assert not at.exception, f"{symbol}: {at.exception}"
+
+
+# --- the closing "Bottom line" card ------------------------------------------
+
+
+def test_the_bottom_line_card_restates_the_top_action():
+    """It must be the same locked decision, not a second computed verdict."""
+    symbol = _any_symbol()
+    research = pd.read_csv(RESEARCH_PATH)
+    action = str(research.loc[research["Symbol"] == symbol, "Action"].iloc[0])
+    text = _stock_text(symbol)
+    i = text.find("Bottom line</div>")
+    assert i >= 0
+    assert f'>{action}<' in text[i:i + 400]
+
+
+def test_minervini_is_labelled_context_not_a_vote():
+    text = _stock_text(_any_symbol())
+    i = text.find("Bottom line</div>")
+    assert i >= 0
+    assert "not a vote" in text[i:i + 1500]
+
+
+def test_a_full_template_pass_can_sit_beside_a_non_buy_action():
+    """ABB: Trend_Template_Score 8/8, Action HOLD. Proves Minervini doesn't vote."""
+    research = pd.read_csv(RESEARCH_PATH)
+    if "ABB" not in research["Symbol"].values:
+        pytest.skip("ABB not in the live snapshot")
+    row = research.loc[research["Symbol"] == "ABB"].iloc[0]
+    if row.get("Trend_Template_Score") != 8:
+        pytest.skip("ABB no longer scores 8/8 in the live snapshot")
+    text = _stock_text("ABB")
+    i = text.find("Bottom line</div>")
+    assert i >= 0
+    window = text[i:i + 900]
+    assert "all eight trend-template criteria met" in window
+    assert f'>{row["Action"]}<' in window
+
+
+def test_no_bottom_line_card_when_no_authority_has_anything_to_say():
+    """A row with no classifiable Stage, RS or v2.2 evidence yields no quotes."""
+    from rs_stages import signal_card
+
+    empty_row = pd.Series({"Stage": None, "RS_Score": float("nan")})
+    assert signal_card.weinstein_line(empty_row) == ""
+    assert signal_card.oneil_line(empty_row) == ""
+    assert signal_card.minervini_line(empty_row) == ""

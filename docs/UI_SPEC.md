@@ -88,6 +88,17 @@ The stock page must present, in order:
    a flat "Signal card" and a flat threshold table shared with Weinstein's.
 7. Calculation detail with properly formatted values.
 8. Method/source note.
+9. **Bottom line** — the same Action and reason from item 2, restated after
+   all three boxes, with each authority's own conclusion sentence quoted
+   beneath it (omitted per authority when that authority has nothing to
+   say). This is presentation only: it computes nothing, calling the same
+   `weinstein_line` / `oneil_line` / `minervini_line` functions the boxes
+   already call. Minervini's line is explicitly labelled context, not a
+   vote — `action_for()` never reads a v2.2 field, so a full trend-template
+   pass can and does sit beside a plain HOLD. A second, independently
+   computed verdict must never be built here: that would let two "final
+   answers" disagree on one page, which defeats the reason Action is
+   locked to begin with.
 
 ## Visual language
 
