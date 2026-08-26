@@ -11,11 +11,15 @@ from rs_stages.signal_card import (
     caution_note,
     conflict_note,
     extension_band,
+    minervini_line,
+    oneil_checklist,
+    oneil_line,
     rs_percentile_text,
     signal_rows,
     source_line,
     volume_state,
     wait_note,
+    weinstein_line,
 )
 
 
@@ -178,3 +182,72 @@ def test_contraction_evidence_alone_does_not_claim_the_template():
     line = source_line(row)
     assert "contracting range" in line
     assert "trend-template" not in line
+
+
+# --- the three authorities read separately, and together equal source_line --
+
+def test_source_line_is_exactly_the_three_authors_concatenated():
+    """The combined citation must not drift from its three parts."""
+    row = _row(RS_Line_NH_Before_Price=True, VCP_Setup=True, Trend_Template_Pass=True)
+    parts = [weinstein_line(row), oneil_line(row), minervini_line(row)]
+    assert source_line(row) == " · ".join(filter(None, parts))
+
+
+def test_weinstein_line_never_mentions_oneil_or_minervini():
+    row = _row(RS_Line_NH_Before_Price=True, VCP_Setup=True, Trend_Template_Pass=True)
+    line = weinstein_line(row)
+    assert "Weinstein" in line
+    assert "O'Neil" not in line
+    assert "Minervini" not in line
+
+
+def test_oneil_line_never_mentions_weinstein_or_minervini():
+    row = _row(RS_Line_NH_Before_Price=True, VCP_Setup=True, Trend_Template_Pass=True)
+    line = oneil_line(row)
+    assert "O'Neil" in line
+    assert "Weinstein" not in line
+    assert "Minervini" not in line
+
+
+def test_minervini_line_never_mentions_weinstein_or_oneil():
+    row = _row(VCP_Setup=True, Trend_Template_Pass=True)
+    line = minervini_line(row)
+    assert "Minervini" in line
+    assert "Weinstein" not in line
+    assert "O'Neil" not in line
+
+
+def test_minervini_line_is_empty_on_a_pre_v22_row():
+    row = _row()  # no VCP_Setup / Trend_Template_Pass fields at all
+    assert minervini_line(row) == ""
+
+
+# --- O'Neil's itemized checklist ---------------------------------------------
+
+def test_oneil_checklist_has_three_items_without_v22_fields():
+    row = _row()  # no RS_Line_At_High / RS_Line_NH_Before_Price columns
+    checklist = oneil_checklist(row)
+    assert len(checklist) == 3
+    assert [label for label, _ in checklist] == [
+        "Relative strength 80 or better (leadership)",
+        "Volume 1.5× or more confirms the breakout",
+        "Up/down volume 1.3× or more confirms accumulation",
+    ]
+
+
+def test_oneil_checklist_gains_two_items_when_the_rs_line_is_published():
+    row = _row(RS_Line_At_High=True, RS_Line_NH_Before_Price=False)
+    checklist = oneil_checklist(row)
+    assert len(checklist) == 5
+    by_label = dict(checklist)
+    assert by_label["Relative-strength line at a 52-week high"] is True
+    assert by_label["Relative strength leading price out of the base"] is False
+
+
+def test_oneil_checklist_marks_match_the_same_thresholds_signal_rows_uses():
+    """The itemized checklist and the old flat table must agree on the same row."""
+    row = _row(RS_Score=99.0, Volume_Ratio=14.4, U_D=16.5)
+    checklist = dict(oneil_checklist(row))
+    rows = {r.signal: r.status for r in signal_rows(row)}
+    assert checklist["Relative strength 80 or better (leadership)"] == (rows["Relative strength"] == "met")
+    assert checklist["Volume 1.5× or more confirms the breakout"] == (rows["Volume ratio"] == "met")

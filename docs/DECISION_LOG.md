@@ -465,3 +465,62 @@ Tests: three new tests drive the real Stock page against symbols picked
 adaptively from whatever the live snapshot holds — a full pass, a partial
 pass, and the footer wording — plus two new screener-level tests pinning the
 eight field names and the three-of-eight provisional count.
+
+### D-2.2.10 — Weinstein, O'Neil and Minervini each get their own box
+
+Minervini's trend template had just been given an itemized checklist
+(D-2.2.9). Asked whether Weinstein and O'Neil got the same treatment, they
+did not: Weinstein's five conditions were already itemized, but O'Neil had no
+box and no checklist at all — his evidence (RS leadership, volume
+confirmation, U/D, the RS line) was scattered across a flat "Signal card" and
+a flat "Every signal against its threshold" table that also carried
+Weinstein's Stage and extension figures in the same list. A reader could not
+see O'Neil's case for a stock in one place the way Minervini's or Weinstein's
+could already be seen.
+
+Checking where the RS-line evidence actually lived surfaced a second,
+independent problem: `source_line()` has always attributed
+`RS_Line_NH_Before_Price` to O'Neil ("the relative-strength line turning up
+before price is the leading tell"), but the card displaying it sat inside the
+Minervini v2.2 section. The citation text and the display disagreed with each
+other. Reorganizing by author rather than by "when the field was added"
+surfaced this on its own; it would not have been caught by inspecting either
+side alone.
+
+Three changes.
+
+`signal_card.source_line()` — previously one function building one combined
+sentence — is split into `weinstein_line`, `oneil_line` and `minervini_line`,
+each returning only that author's fragment. `source_line` becomes their
+concatenation, preserving its exact prior output so its five existing tests
+needed no changes. A box's conclusion now calls only its own author's
+function, which makes citing the wrong authority a type of bug the structure
+itself prevents rather than one that has to be caught by review.
+
+`oneil_checklist()` is new: three always-published threshold comparisons
+(RS ≥ 80, volume ≥ 1.5×, U/D ≥ 1.3) using the exact constants
+`signal_rows()` already applied — no new number is introduced, only a new
+itemized presentation of an existing comparison — plus the two RS-line
+conditions, included only when their v2.2 columns are actually present so an
+older snapshot shows three items rather than five silently-failed ones.
+
+The Stock page now shows three boxes — Weinstein beside the returns/range
+card, O'Neil and Minervini below — each an itemized checklist plus that
+authority's own conclusion sentence. The flat Signal Card and threshold
+table are removed; `wait_note`, `conflict_note` and `caution_note` survive
+under "Where the readings interact", since a Stage/RS conflict or a WAIT's
+exact gap is a statement about two authorities disagreeing and belongs to
+neither box alone. The numeric values the threshold table used to carry
+(volume ratio, U/D, 30-week slope, the RS line and its 52-week high) are not
+lost — they move into the Calculation-detail grid, in a new "Volume and
+momentum" card and two added rows on "Trend structure", so removing the flat
+table did not remove the numbers themselves.
+
+Tests: 345 passing, 16 new — signal_card-level tests that each author's line
+function names only that author, that `oneil_checklist` grows from three to
+five items exactly when the v2.2 columns appear, and that its marks agree
+with the same thresholds `signal_rows()` used; app-level tests driven against
+the live snapshot confirming all three boxes render, the old flat sections
+are gone, the RS-line evidence is no longer inside Minervini's section, the
+interaction notes appear only when there is something to say, and a
+five-symbol sample renders every box without exception.

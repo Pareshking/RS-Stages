@@ -1021,24 +1021,12 @@ def page_stock() -> None:
             )
         )
     with right:
-        conditions = [
+        weinstein_conditions = [
             (label, bool(row.get(field, False)))
             for field, label in TREND_HEALTH_CONDITIONS
             if field in row.index
         ]
-        met = sum(1 for _, passed in conditions if passed)
-        write(
-            ui.card(
-                '<div class="ws-card-title" style="display:flex;align-items:center;gap:6px">'
-                "Trend-health checklist"
-                f'<span class="num" style="color:var(--faint);font-weight:600">{met}/{len(conditions)}</span></div>'
-                + (
-                    ui.checklist(conditions)
-                    if conditions
-                    else '<div class="ws-note">The snapshot does not carry the checklist fields.</div>'
-                )
-            )
-        )
+        write(_author_box("Weinstein", weinstein_conditions, signal_card.weinstein_line(row)))
 
     # Extension and structural risk
     ext = to_float(row.get("Ext_Pct"))
@@ -1077,59 +1065,37 @@ def page_stock() -> None:
         )
     )
 
-    # The Signal Card — section 4 of the NSE Signal Interpretation Guide's
-    # "Option B" display: the interpretation label on top, and every component
-    # that produced it visible underneath. The guide's own framing is that the
-    # label is a filter and the evidence panel is the decision, so the notes
-    # below state what a WAIT is waiting for, where the signals disagree, and
-    # the risk the label alone misses.
+    # Three authorities, three boxes. Weinstein's sits above in the header
+    # row; O'Neil's and Minervini's follow here, each an itemized checklist
+    # plus that authority's own conclusion sentence and nothing else's —
+    # separating them is the point, so a reader can see exactly which
+    # criteria one book's method is satisfying without another's evidence
+    # folded into the same card.
     st.write("")
-    write('<div class="ws-eyebrow" style="margin-bottom:8px">Signal card</div>')
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">O\'Neil</div>')
+    write(_author_box("O'Neil", signal_card.oneil_checklist(row), signal_card.oneil_line(row)))
 
-    ext_band, ext_tone = signal_card.extension_band(row.get("Ext_Pct"))
-    stage_tone = {"Stage 2": "good", "Stage 3": "warn", "Stage 4": "bad"}.get(
-        theme.stage_key(stage), "neutral"
-    )
-    ud_value = to_float(row.get("U_D"))
-    lines = "".join(
-        [
-            ui.signal_line("Stage", stage_display(stage), stage_tone),
-            ui.signal_line(
-                "Relative strength",
-                signal_card.rs_percentile_text(row.get("RS_Score")),
-                "good" if to_float(row.get("RS_Score")) >= 80 else "neutral",
-            ),
-            ui.signal_line(
-                "Volume",
-                f"{fmt_ratio(row.get('Volume_Ratio'))} average · U/D "
-                f"{fmt_ratio(row.get('U_D'))} — {signal_card.volume_state(row)}",
-                "bad" if ud_value < 0.7 else ("good" if ud_value > 1.3 else "neutral"),
-            ),
-            ui.signal_line(
-                "Extension",
-                f"{fmt_pct(row.get('Ext_Pct'))} above the 30-week line — {ext_band}",
-                ext_tone,
-            ),
-        ]
-    )
-    notes = "".join(
+    # v2.2 — Minervini's box, deliberately its own section below: these
+    # fields describe what has *not* happened yet, and mixing them into the
+    # evidence for the current Action would blur the two.
+    _prebreakout_section(row)
+
+    # Cross-authority notes. Section 6 of the guide: when the signals
+    # disagree, or a WAIT is waiting on something specific, or the label
+    # alone misses a timing risk, none of that belongs to one author alone —
+    # it is a statement about how two readings interact, so it sits after
+    # all three boxes rather than inside any single one of them.
+    interaction_notes = "".join(
         [
             ui.signal_note("wait", signal_card.wait_note(row, action)),
             ui.signal_note("conflict", signal_card.conflict_note(row)),
             ui.signal_note("caution", signal_card.caution_note(row)),
-            ui.signal_note("source", signal_card.source_line(row)),
         ]
     )
-    write(ui.card(lines + notes))
-
-    st.write("")
-    write('<div class="ws-eyebrow" style="margin-bottom:8px">Every signal against its threshold</div>')
-    write(ui.threshold_table(signal_card.signal_rows(row)))
-
-    # v2.2 — the pre-breakout structure. Deliberately its own block below the
-    # threshold table: these fields describe what has *not* happened yet, and
-    # mixing them into the evidence for the current Action would blur the two.
-    _prebreakout_section(row)
+    if interaction_notes:
+        st.write("")
+        write('<div class="ws-eyebrow" style="margin-bottom:8px">Where the readings interact</div>')
+        write(ui.card(interaction_notes))
 
     # The remaining locked fields the Action spec requires exposed, grouped by
     # the measure each belongs to rather than dumped as one flat list.
@@ -1160,7 +1126,30 @@ def page_stock() -> None:
                          "Mean close over the latest 50 completed sessions."),
                         ("Below the 50-session average", ui.state_pill(row.get("Below_50DMA"), "warn"),
                          "A timing warning; it does not reclassify Stage."),
+                        ("30-week slope", fmt_pct(row.get("MA_30W_Slope_10S_Pct")),
+                         "Change in the 30-week line over the latest 10 completed sessions."),
                     ],
+                ),
+                ui.evidence_card(
+                    "Volume and momentum",
+                    [
+                        ("Volume ratio", fmt_ratio(row.get("Volume_Ratio")),
+                         "Latest session's volume against the prior-50 baseline."),
+                        ("U/D ratio", fmt_ratio(row.get("U_D")),
+                         "Up-day volume over down-day volume; below 0.7 is distribution."),
+                        ("Near the 52-week high", ui.state_pill(row.get("Near_52W_High"), "good"),
+                         "Within 3% of the 52-week high — part of O'Neil's breakout setup."),
+                    ]
+                    + (
+                        [
+                            ("RS line", fmt_number(row.get("RS_Line"), 4),
+                             "Close ÷ Nifty 500 on the sessions both actually traded."),
+                            ("52-week RS line high", fmt_number(row.get("RS_Line_High_52W"), 4),
+                             "Maximum RS line over the trailing 52 calendar weeks."),
+                        ]
+                        if "RS_Line" in row.index
+                        else []
+                    ),
                 ),
                 ui.evidence_card(
                     "52-week range",
@@ -1197,6 +1186,34 @@ def page_stock() -> None:
     )
 
 
+def _author_box(title: str, conditions: list[tuple[str, bool]], conclusion: str) -> str:
+    """One authority's evidence: its own itemized checklist plus its own conclusion.
+
+    Each authority gets a separate box rather than one flat signal card mixing
+    all three, so a reader can see exactly which criteria one book's method
+    is satisfying without the others' evidence in between. The conclusion is
+    not free text: it is built in signal_card.py from the row's own values
+    (weinstein_line / oneil_line / minervini_line), so it can only ever name a
+    criterion the checklist above it already shows as met.
+    """
+    met = sum(1 for _, passed in conditions if passed)
+    body = (
+        ui.checklist(conditions)
+        if conditions
+        else '<div class="ws-note">The snapshot does not carry the checklist fields.</div>'
+    )
+    footer = (
+        f'<div class="ws-note" style="margin-top:10px">{ui.esc(conclusion)}</div>'
+        if conclusion
+        else ""
+    )
+    count = f'<span class="num" style="color:var(--faint);font-weight:600">{met}/{len(conditions)}</span>' if conditions else ""
+    return ui.card(
+        f'<div class="ws-card-title" style="display:flex;align-items:center;gap:6px">'
+        f'{ui.esc(title)}{count}</div>{body}{footer}'
+    )
+
+
 def _prebreakout_section(row: pd.Series) -> None:
     """v2.2 §4.1, §5.1, §10.4-10.6, §11.1 for one stock.
 
@@ -1209,7 +1226,12 @@ def _prebreakout_section(row: pd.Series) -> None:
         return
 
     st.write("")
-    write('<div class="ws-eyebrow" style="margin-bottom:8px">Before the move — v2.2</div>')
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Minervini</div>')
+    write(
+        '<div class="ws-note" style="margin-bottom:10px">Before the move — everything else on '
+        "this page measures what has already happened; this is the structure Minervini looks "
+        "for before a stock breaks out.</div>"
+    )
 
     def num(value, suffix="", digits=2, absent="—"):
         v = pd.to_numeric(value, errors="coerce")
@@ -1222,19 +1244,6 @@ def _prebreakout_section(row: pd.Series) -> None:
     readiness = pd.to_numeric(row.get("Stage1_Readiness"), errors="coerce")
 
     cards = [
-        ui.evidence_card(
-            "Relative strength line",
-            [
-                (
-                    "Leading price",
-                    "Yes — new high before price" if bool(row.get("RS_Line_NH_Before_Price"))
-                    else ("At its high" if bool(row.get("RS_Line_At_High")) else "No"),
-                    "good" if bool(row.get("RS_Line_NH_Before_Price")) else "neutral",
-                ),
-                ("RS line", num(row.get("RS_Line"), digits=4), "neutral"),
-                ("52-week RS line high", num(row.get("RS_Line_High_52W"), digits=4), "neutral"),
-            ],
-        ),
         ui.evidence_card(
             "Contraction and volume",
             [
@@ -1288,6 +1297,10 @@ def _prebreakout_section(row: pd.Series) -> None:
                 + ui.checklist(template_conditions)
             )
         )
+
+    minervini_conclusion = signal_card.minervini_line(row)
+    if minervini_conclusion:
+        write(f'<div class="ws-note" style="margin-top:8px">{ui.esc(minervini_conclusion)}</div>')
 
     write(
         '<div class="ws-note" style="margin:10px 0 0">None of these is a decision rule. '

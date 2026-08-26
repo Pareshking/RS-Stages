@@ -190,8 +190,8 @@ def caution_note(row: Any) -> str:
     return ""
 
 
-def source_line(row: Any) -> str:
-    """Trace the reading back to the book it comes from."""
+def weinstein_line(row: Any) -> str:
+    """Weinstein's own reading alone: stage and breakout confirmation."""
     stage = _stage(row.get("Stage"))
     parts: list[str] = []
     if stage == "Stage 2":
@@ -202,7 +202,19 @@ def source_line(row: Any) -> str:
         parts.append("Weinstein: Stage 3 is topping — reduce exposure")
     elif stage == "Stage 1":
         parts.append("Weinstein: Stage 1 is basing — wait for the breakout")
+    if bool(row.get("Breakout_Confirmed")):
+        parts.append("Weinstein: breakout confirmed by volume")
+    return " · ".join(parts)
 
+
+def oneil_line(row: Any) -> str:
+    """O'Neil's own reading alone: relative-strength rank and the RS line.
+
+    The RS-line evidence is guarded on the field actually being present, so a
+    snapshot published before v2.2 cites only the rank, which is all it ever
+    carried.
+    """
+    parts: list[str] = []
     rs = _num(row.get("RS_Score"))
     if math.isfinite(rs):
         parts.append(
@@ -210,16 +222,16 @@ def source_line(row: Any) -> str:
             if rs >= RS_LEADERSHIP
             else "O'Neil: buy leaders, not laggards"
         )
-    if bool(row.get("Breakout_Confirmed")):
-        parts.append("Weinstein: breakout confirmed by volume")
-
-    # v2.2 sources. Guarded on the evidence actually being present, so a
-    # snapshot published before v2.2 simply cites the two earlier authors
-    # rather than claiming a reading it does not carry.
     if bool(row.get("RS_Line_NH_Before_Price")):
         parts.append(
             "O'Neil: the relative-strength line turning up before price is the leading tell"
         )
+    return " · ".join(parts)
+
+
+def minervini_line(row: Any) -> str:
+    """Minervini's own reading alone: the contraction setup and the template."""
+    parts: list[str] = []
     if bool(row.get("VCP_Setup")):
         parts.append(
             "Minervini: a contracting range on drying volume is the base tightening before a move"
@@ -229,6 +241,40 @@ def source_line(row: Any) -> str:
             "Minervini: all eight trend-template criteria met (thresholds provisional)"
         )
     return " · ".join(parts)
+
+
+def oneil_checklist(row: Any) -> list[tuple[str, bool]]:
+    """O'Neil's leadership and confirmation criteria, itemized.
+
+    The first three are threshold comparisons against locked numeric fields
+    using the same constants signal_rows() already applies — no new number is
+    introduced, only a new itemized presentation of an existing comparison.
+    The last two are the relative-strength-line evidence: they are O'Neil's
+    per the attribution above, not Minervini's, so they are read from the
+    row here rather than shown in the trend-template section. Each is
+    included only when the underlying v2.2 field is actually present, so an
+    older snapshot shows three items rather than five silently-failed ones.
+    """
+    rs = _num(row.get("RS_Score"))
+    vol = _num(row.get("Volume_Ratio"))
+    ud = _num(row.get("U_D"))
+    items = [
+        ("Relative strength 80 or better (leadership)", math.isfinite(rs) and rs >= RS_LEADERSHIP),
+        ("Volume 1.5× or more confirms the breakout", math.isfinite(vol) and vol > VOLUME_BREAKOUT),
+        ("Up/down volume 1.3× or more confirms accumulation", math.isfinite(ud) and ud > UD_CONFIRM),
+    ]
+    if "RS_Line_At_High" in row.index:
+        items.append(("Relative-strength line at a 52-week high", bool(row.get("RS_Line_At_High"))))
+    if "RS_Line_NH_Before_Price" in row.index:
+        items.append(
+            ("Relative strength leading price out of the base", bool(row.get("RS_Line_NH_Before_Price")))
+        )
+    return items
+
+
+def source_line(row: Any) -> str:
+    """Trace the reading back to the book it comes from, all three combined."""
+    return " · ".join(filter(None, [weinstein_line(row), oneil_line(row), minervini_line(row)]))
 
 
 def signal_rows(row: Any) -> list[SignalRow]:

@@ -66,14 +66,26 @@ The stock page must present, in order:
 3. Stage + RS + RS band.
 4. Breakout/confirmation and timing warnings.
 5. Price + 30W MA interactive chart.
-6. Evidence checklist(s) — every authority with a stated criteria list gets its
-   own itemized checklist, not a collapsed score. Weinstein's trend-health (5
-   conditions) and Minervini's trend template (8 conditions, §5.1) are each
-   rendered with a pass/fail mark per item; a summary count is a
+6. Evidence checklist(s), **one box per authority, never one flat mixed
+   list**. Weinstein (trend-health, 5 conditions), O'Neil (leadership and
+   confirmation, 3-5 conditions depending on whether v2.2 fields are
+   published) and Minervini (trend template, 8 conditions, §5.1) each get
+   their own itemized checklist with a pass/fail mark per item, followed by
+   that authority's own conclusion sentence — a deterministic line built
+   from the row's values, never free text, and never naming a criterion the
+   checklist above it does not already show as met. A summary count is a
    supplementary total on top of the itemized list, never a replacement for
-   it. Found missing for the trend template on 26 Aug 2026 — it had only a
-   collapsed "N of 8" figure while trend-health was already itemized — so
-   this is now explicit rather than left to be inferred from one example.
+   it. Content is filed under the authority it actually belongs to, not the
+   order it was added in: the relative-strength-line evidence is O'Neil's
+   per the attribution text and lives in his box, not Minervini's, even
+   though it shipped in the same v2.2 release as the trend template.
+   Content that describes how two authorities' readings interact — a WAIT's
+   exact gap, a Stage/RS conflict, an extension timing risk — belongs to
+   neither box alone and is shown separately, after all three.
+   Found incomplete twice: the trend template had only a collapsed "N of 8"
+   score on 26 Aug 2026 while trend-health was already itemized, and O'Neil
+   had no box or checklist of his own at all, his evidence scattered across
+   a flat "Signal card" and a flat threshold table shared with Weinstein's.
 7. Calculation detail with properly formatted values.
 8. Method/source note.
 
@@ -169,6 +181,15 @@ that row, guarded on the evidence existing. A card must never name an authority
 for a criterion it did not test. All three authorities carry equal citation
 obligation; the newest is the easiest to omit and was in fact omitted across
 every surface in the first v2.2 pass.
+
+On the Stock page this obligation is structural, not just textual: each
+authority's evidence lives in that authority's own box (§ Stock page
+requirements, item 6), so a criterion cannot be silently shown without its
+citation the way a flat mixed list allowed. `signal_card.py` exposes
+`weinstein_line`, `oneil_line` and `minervini_line` as the three disjoint
+fragments `source_line` concatenates; a box's conclusion calls its own
+fragment only, so it is structurally impossible for one box to cite a
+different authority.
 
 ### Not presented
 
