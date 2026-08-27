@@ -1,15 +1,22 @@
 """Scheduling and publishing invariants for the workflows that write to main.
 
 Two scheduled workflows commit to the repository: the weekday research audit
-and the Friday universe refresh. They were both set to fire at 18:00 UTC, which
-is not a coincidence that costs nothing — the audit runs for about three
-minutes and the refresh for about twenty seconds, so every Friday on which the
-constituent list changed, the refresh would land first and the audit's push
-would be rejected non-fast-forward at its final step. The audit replaces the
-price panel on the release *before* it commits, so that failure leaves a panel
-one session ahead of the committed snapshot: exactly the drift the loader
-refuses to draw through, i.e. a live terminal with no charts until someone
-re-runs by hand.
+and the Friday universe refresh. They must never share a fire-minute — the
+audit runs for about three minutes and the refresh for about twenty seconds,
+so if the constituent list changed and the two collided, the refresh would
+land first and the audit's push would be rejected non-fast-forward at its
+final step. The audit replaces the price panel on the release *before* it
+commits, so that failure leaves a panel one session ahead of the committed
+snapshot: exactly the drift the loader refuses to draw through, i.e. a live
+terminal with no charts until someone re-runs by hand.
+
+The audit runs the morning after each session (01:00 UTC / 6:30 IST, D-2.2.12)
+rather than the same evening, giving the price provider a longer buffer after
+the 15:30 IST close; the refresh still runs Friday evening. The two schedules
+no longer share a calendar day at all, which removes the collision risk by
+construction rather than by a tight margin — these tests still pin it
+explicitly rather than trusting that construction to hold as either schedule
+changes in the future.
 
 These tests pin the two properties that prevent it: the schedules are ordered
 and disjoint, and neither push can die on a race it could rebase past.
@@ -103,26 +110,30 @@ def test_no_two_publishing_workflows_share_a_fire_minute():
             )
 
 
-def test_the_universe_refresh_lands_before_the_friday_audit():
-    """Friday's audit must analyse the constituent list published that evening.
+def test_the_universe_refresh_is_seen_by_the_very_next_audit_run():
+    """Whichever audit run comes right after the refresh must be able to see it.
 
     The audit checks the repository out when it starts, so a universe published
-    after that start is invisible to it until the following run.
+    after that start is invisible to it until the following run. This does not
+    assume the two land on the same calendar day: when the audit moved to the
+    morning after each session (D-2.2.12), its Friday slot shifted to catching
+    Thursday's close, and it is the *Saturday* run that now lands after the
+    Friday refresh — the relationship is "the next audit run in the week",
+    wrapping past Sunday if needed, not a fixed weekday.
     """
-    audit = set().union(*(fire_minutes(c) for c in _crons(_workflows()["real_data_audit.yml"])))
+    audit = sorted(set().union(*(fire_minutes(c) for c in _crons(_workflows()["real_data_audit.yml"]))))
     universe = set().union(
         *(fire_minutes(c) for c in _crons(_workflows()["update_nse_universe.yml"]))
     )
-    friday = range(4 * 24 * 60, 5 * 24 * 60)
-    audit_friday = sorted(m for m in audit if m in friday)
-    universe_friday = sorted(m for m in universe if m in friday)
-    assert audit_friday, "the audit is expected to run on Friday"
-    assert universe_friday, "the universe refresh is expected to run on Friday"
-    gap = min(audit_friday) - max(universe_friday)
-    assert gap > 0, "the universe refresh must fire before the audit, not after it"
+    assert audit, "the audit is expected to have a schedule"
+    assert universe, "the universe refresh is expected to have a schedule"
+    refresh_minute = max(universe)
+    after = sorted(m for m in audit if m > refresh_minute)
+    next_audit = after[0] if after else audit[0] + WEEK_MINUTES
+    gap = next_audit - refresh_minute
     # The refresh takes about 20 seconds; the margin is for a slow runner, not
     # for the job itself.
-    assert gap >= 15, f"only {gap} minutes between the refresh and the audit"
+    assert gap >= 15, f"only {gap} minutes between the refresh and the next audit run"
 
 
 def test_every_publishing_push_can_survive_a_moved_main():

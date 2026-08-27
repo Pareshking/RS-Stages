@@ -574,3 +574,77 @@ Action already shown at the top, ABB's 8/8-yet-HOLD case is pinned by
 name, the "not a vote" wording is asserted present, and all three line
 functions are confirmed to return empty strings together on a row with no
 classifiable evidence at all.
+
+### D-2.2.12 — The audit moves to the morning after each session
+
+Three consecutive real trading-day transitions (24->25, 25->26, 26->27 Aug
+2026) landed the audit one session behind: run at 23:45 IST the same evening,
+the price provider still had not posted that day's close, even up to ten
+hours after the 15:30 IST NSE close. The information boundary logic was never
+wrong — it correctly refused to fabricate a session the provider had not
+actually published, stepping back to the last one it had — but a same-evening
+run gave the provider too little time to have posted in the first place.
+
+The schedule moves to 01:00 UTC, 6:30 IST the *next* calendar day, roughly
+doubling the buffer after close from about 8 hours to about 15. Day-of-week
+shifts by one to match: a Monday session is now picked up Tuesday morning
+through a Friday session picked up Saturday morning, so Mon-Fri sessions map
+to Tue-Sat runs.
+
+This moves the audit off Friday entirely in the old sense — its Friday-morning
+slot now catches *Thursday's* close, and it is the *Saturday* run that lands
+after the weekly universe refresh (Friday 17:15 UTC) with margin, not a
+same-day Friday run. `tests/test_workflow_scheduling.py`'s ordering test is
+rewritten to check "the very next audit run after the refresh, wrapping the
+week if needed" rather than assuming they share a calendar day, so it states
+the actual invariant rather than one specific schedule that happened to
+satisfy it.
+
+### D-2.2.13 — A watchdog, and a manual trigger, after the schedule silently skipped a day
+
+Separately from the provider's lag, 27 Aug 2026's scheduled run did not fire
+at all — not late, absent. The workflow showed `state: active`, and a manual
+`workflow_dispatch` queued and completed normally seconds after being fired,
+which rules out anything wrong with the pipeline, the token permissions, or
+the workflow file itself. GitHub's own documentation states plainly that
+`schedule:` triggers are best-effort and can be dropped outright, not merely
+delayed — this is a platform characteristic to build around, not a defect to
+root-cause further in this repository's own code.
+
+Two additions, addressing the two different failure classes directly rather
+than one mechanism trying to cover both.
+
+`audit_watchdog.yml` runs an hour after the audit's own target time, on the
+same days. It lists the audit workflow's recent runs (a read, needing only
+the automatic token) and, finding none successful in the last 6 hours,
+dispatches the audit itself using a personal access token stored as the
+repository secret `WORKFLOW_TRIGGER_PAT` — the automatic `GITHUB_TOKEN`
+cannot dispatch another workflow run by design, to prevent an Actions run
+from spawning further Actions runs unbounded. If that secret is absent, the
+watchdog fails loudly (`::error::`, non-zero exit) rather than silently
+concluding there was nothing to do, since a watchdog that quietly no-ops
+when unconfigured is worse than no watchdog: it looks like protection that
+was never actually wired up.
+
+A "Trigger audit now" control is added to the bottom of the Dashboard view
+only, in `rs_stages/ui/dispatch.py`, for the case a human notices staleness
+before either automated mechanism does. Two guards, because the site is
+public with no login and this fires a real workflow run and a real git push:
+the control needs a Streamlit secret (`GITHUB_DISPATCH_TOKEN`) that only the
+site's owner can set, and is entirely absent from the Dashboard without it —
+never a button that silently does nothing; and it is rate-limited by reading
+the audit workflow's own run history from GitHub, not any per-browser or
+per-session state, so the limit holds across every visitor combined rather
+than being trivially defeated by opening a new browser session.
+
+Both secrets are the same underlying token, stored twice because a GitHub
+Actions secret and a Streamlit secret are different stores on different
+platforms; README.md's new Operations section gives the exact one-time setup
+steps, since generating a credential is a human action neither an agent nor a
+workflow can perform on the owner's behalf.
+
+Tests: 366 passing, 17 new — 7 pinning the watchdog's schedule relationship
+to the audit and its loud-failure behaviour, 10 driving `dispatch.py`'s
+decision logic (configured/unconfigured, cooldown active/clear, network
+failure, a rejected token) directly against a mocked `urllib`, with no real
+network call and no real token required to verify the logic.

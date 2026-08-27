@@ -55,6 +55,52 @@ value.
 
 All signals respect the pre-market information boundary: the latest completed NSE session is the terminal information date for the upcoming decision session.
 
+## Operations
+
+### Schedule
+
+| Workflow | Fires | Purpose |
+| --- | --- | --- |
+| `real_data_audit.yml` | 01:00 UTC / 6:30 IST, Tue-Sat | The morning after each Mon-Fri session, giving the price provider the full night rather than the same evening (D-2.2.12). |
+| `audit_watchdog.yml` | 02:00 UTC, Tue-Sat | An hour later, same days. Retriggers the audit if it did not run at all — GitHub documents `schedule:` as best-effort and known to drop a firing outright, not only delay it (D-2.2.13). |
+| `update_nse_universe.yml` | 17:15 UTC, Fri | The constituent list. Lands well ahead of the next audit run (Saturday morning), never on the same calendar day. |
+
+### One-time setup: two secrets, created once by the repository owner
+
+Two features need a GitHub personal access token that only the owner can
+create — neither Claude nor any workflow can generate one on your behalf,
+since issuing a credential is deliberately a human-only action.
+
+**Create the token once:** GitHub -> Settings -> Developer settings -> Personal
+access tokens -> Fine-grained tokens -> Generate new token. Scope it to this
+repository only, with **Actions: Read and write** permission. Nothing else is
+needed.
+
+**Use it in two places**, because it unlocks two independent features and each
+lives in a different secrets store:
+
+1. **The watchdog's retrigger step** (`audit_watchdog.yml`) needs it as a
+   **GitHub repository secret** named `WORKFLOW_TRIGGER_PAT`: this repo's
+   Settings -> Secrets and variables -> Actions -> New repository secret.
+   Without it, the watchdog still runs and still checks whether the audit
+   fired, but fails loudly (`::error::`, not a silent no-op) when it finds a
+   gap and cannot retrigger it.
+
+2. **The Dashboard's "Trigger audit now" button** (bottom of the Dashboard
+   view, in an expander) needs it as a **Streamlit secret** named
+   `GITHUB_DISPATCH_TOKEN`: the deployed app's Settings -> Secrets, in the
+   Streamlit Community Cloud dashboard. Without it, the button and its
+   expander do not render at all — the Dashboard degrades to exactly what it
+   showed before this feature existed, never an error.
+
+The same token value goes in both places. They are separate stores on separate
+platforms; setting one does not set the other.
+
+The button's rate limit (one trigger per `dispatch.COOLDOWN_MINUTES`, 20 by
+default) is checked against the audit workflow's own run history on GitHub,
+not against anything stored per-browser — it holds across every visitor at
+once, since the site is public with no login.
+
 ## Validation Status
 
 GitHub Actions CI is configured to execute the test suite. A test suite is only considered passed when actual CI execution evidence is available.

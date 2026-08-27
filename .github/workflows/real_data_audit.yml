@@ -1,16 +1,23 @@
 name: Real Data Research Audit
 
 on:
-  # 18:15 UTC is 23:45 IST — after the NSE close settles at the provider, and
-  # before the next trading session opens. The snapshot is therefore the latest
-  # completed session, which is exactly the pre-market information boundary the
-  # locked spec requires. Weekdays only: NSE does not trade at the weekend.
+  # 01:00 UTC is 6:30 IST the *next* calendar day — run the morning after each
+  # session, not the same evening. Three consecutive sessions (24->25, 25->26,
+  # 26->27 Aug 2026) found the price provider still hadn't posted the day's
+  # close by 23:45 IST same-day, so the run fell back to the prior session
+  # every time. Moving to the next morning gives the provider roughly 15 hours
+  # after the 15:30 IST close instead of about 8, which is the actual fix —
+  # the boundary logic was never wrong, the provider just needed more time
+  # than a same-evening run gave it. See DECISION_LOG D-2.2.12.
   #
-  # The Friday universe refresh runs at 17:15 UTC, a full hour ahead, so this
-  # run always checks out the constituent list that refresh just published and
-  # never races it for the push. See tests/test_workflow_scheduling.py.
+  # Day-of-week is shifted by one accordingly: a Monday session is picked up
+  # Tuesday morning, ... a Friday session Saturday morning. Mon-Fri sessions
+  # therefore need Tue-Sat runs (Sunday and Monday mornings have no preceding
+  # session to fetch). The universe refresh still fires Friday 17:15 UTC; it
+  # is now the *Saturday* run that lands after it with margin, not a same-day
+  # Friday one — see tests/test_workflow_scheduling.py.
   schedule:
-    - cron: "15 18 * * 1-5"
+    - cron: "0 1 * * 2-6"
   workflow_dispatch:
     inputs:
       decision_date:

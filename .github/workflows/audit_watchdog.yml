@@ -1,0 +1,61 @@
+name: Audit Watchdog
+
+on:
+  # An hour after the audit's own 01:00 UTC target, same days it runs. GitHub
+  # documents schedule as best-effort and known to drop a firing outright, not
+  # only delay it -- three sessions running (24->25, 25->26, 26->27 Aug 2026)
+  # the audit landed a session behind because the provider hadn't posted yet,
+  # and separately the 27 Aug run never fired at all despite the workflow
+  # showing "active" and a manual dispatch working instantly. This exists for
+  # the second failure: if nothing ran, retrigger it rather than wait for
+  # someone to notice a stale site. See DECISION_LOG D-2.2.13.
+  schedule:
+    - cron: "0 2 * * 2-6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check-and-retrigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether the audit already ran recently
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A run "recent enough" started within the last 6 hours -- wide
+          # enough to cover the audit's own observed scheduling jitter (up to
+          # ~110 minutes late) plus this watchdog's own hour of buffer, narrow
+          # enough that it can never see yesterday's run and wrongly conclude
+          # today already happened. Listing runs only needs read access, so
+          # the automatic token is enough for this half of the job.
+          cutoff=$(date -u -d '6 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          count=$(gh api "repos/${{ github.repository }}/actions/workflows/real_data_audit.yml/runs" \
+            -f "created=>=${cutoff}" -f per_page=10 \
+            --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')
+          echo "recent_successful_runs=$count" >> "$GITHUB_OUTPUT"
+          echo "Found $count successful audit run(s) since $cutoff"
+
+      - name: Re-trigger the audit if it did not run
+        if: steps.check.outputs.recent_successful_runs == '0'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_TRIGGER_PAT }}
+        run: |
+          set -euo pipefail
+          # The automatic token cannot dispatch a workflow run -- GitHub
+          # blocks that specifically to prevent an Actions run from spawning
+          # more Actions runs unbounded. Re-triggering therefore needs a
+          # personal access token stored as this repository secret. Its
+          # absence must fail loudly: a watchdog that silently no-ops when
+          # unconfigured is worse than no watchdog, since it looks like
+          # protection that was never actually wired up.
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::The audit has not run in the last 6 hours, and WORKFLOW_TRIGGER_PAT is not set, so this watchdog cannot retrigger it. Add a personal access token with 'Actions: read and write' on this repository as a repository secret named WORKFLOW_TRIGGER_PAT (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          gh workflow run real_data_audit.yml --ref main
+          echo "The audit had not run in the last 6 hours -- retriggered it."

@@ -25,6 +25,7 @@ from rs_stages import signal_card
 from rs_stages.screener import TREND_HEALTH_CONDITIONS, TREND_TEMPLATE_CONDITIONS
 from rs_stages.ui import charts
 from rs_stages.ui import components as ui
+from rs_stages.ui import dispatch
 from rs_stages.ui import theme
 from rs_stages.ui.loaders import load_price_panel, load_snapshot, panel_matches
 from rs_stages.ui.theme import (
@@ -455,6 +456,36 @@ def page_dashboard() -> None:
                 ],
             )
         )
+
+    st.write("")
+    _manual_trigger_control()
+
+
+def _manual_trigger_control() -> None:
+    """A small, bottom-of-page control to re-run the audit on demand.
+
+    Dashboard only, by design: this triggers a real GitHub Actions run and a
+    real git push, so it does not belong on every view. Never crashes the
+    page it sits on — a missing secret, an unreachable API, or a bad token
+    all degrade to a disabled control with a plain reason, not an exception.
+    """
+    try:
+        status = dispatch.check_status(st.secrets)
+    except Exception:
+        return
+    if not status.configured:
+        return
+    with st.expander("Data looks stale? Trigger a refresh", expanded=False):
+        st.caption(
+            "Runs the same audit the nightly schedule runs. Shared across everyone viewing "
+            f"this site — limited to once every {dispatch.COOLDOWN_MINUTES} minutes regardless "
+            "of who clicks it."
+        )
+        if st.button("Trigger audit now", disabled=not status.can_dispatch, key="manual_trigger"):
+            ok, message = dispatch.trigger_audit(st.secrets)
+            (st.success if ok else st.error)(message)
+        elif status.message:
+            st.caption(status.message)
 
 
 # --- Screener ---------------------------------------------------------------
