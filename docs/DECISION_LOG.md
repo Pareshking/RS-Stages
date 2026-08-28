@@ -648,3 +648,36 @@ to the audit and its loud-failure behaviour, 10 driving `dispatch.py`'s
 decision logic (configured/unconfigured, cooldown active/clear, network
 failure, a rejected token) directly against a mocked `urllib`, with no real
 network call and no real token required to verify the logic.
+
+### D-2.2.14 — The watchdog's own freshness check was wrong on its first day
+
+Both new schedules missed their first real day. 28 Aug's audit target
+(01:00 UTC) was 117 minutes late with nothing fired — past the ~110-minute
+jitter ceiling observed before, a genuine second miss rather than normal
+delay. The watchdog (target 02:00 UTC) never fired even once, zero runs
+total.
+
+Checking what the watchdog would have concluded even if it had fired
+surfaced a real defect in its own logic, independent of whether GitHub's
+scheduler cooperates. Its freshness check was `created since 6 hours ago`
+— a rolling window. The most recent successful run at that point was a
+manual dispatch from 23:05 UTC the evening before, sitting comfortably
+inside that 6-hour window at a 02:00 UTC check. The watchdog would have
+read that as "an audit succeeded recently" and done nothing, never
+noticing that the run it found was yesterday's manual trigger, not
+today's scheduled attempt.
+
+The check is now anchored to today's own calendar date at the audit's
+target time (`date -u +%Y-%m-%dT01:00:00Z`) rather than a rolling window
+measured back from whenever the watchdog happens to run. A run from
+before that boundary — however recent — no longer counts, closing the
+exact gap a rolling window leaves open by construction.
+
+This is tightly coupled to the audit's own cron hour and minute by
+design, and now says so in a comment naming that coupling explicitly, so
+a future change to one schedule is a visible prompt to check the other
+rather than a silent divergence.
+
+Tests: 367 passing, 1 new, asserting both that the literal "hours ago"
+pattern is absent and that the anchor time is read from the audit
+workflow's own cron rather than hardcoded a second time.

@@ -97,3 +97,19 @@ def test_the_retrigger_step_uses_a_distinct_secret_from_the_automatic_token():
 def test_the_watchdog_targets_the_real_audit_workflow_file():
     text = WATCHDOG.read_text()
     assert "real_data_audit.yml" in text
+
+
+def test_the_freshness_check_is_anchored_to_today_not_a_rolling_window():
+    """A rolling window let a manual run from the evening before satisfy the
+    check at the watchdog's own time the next morning, without that run
+    being today's actual scheduled attempt at all. Found live on 28 Aug
+    2026: a 23:05 UTC manual dispatch sat inside a 6-hours-ago window at the
+    watchdog's 02:00 UTC check the next day, masking the real miss."""
+    text = WATCHDOG.read_text()
+    assert "hours ago" not in text, "a rolling lookback window reintroduces the exact bug found on 28 Aug 2026"
+    audit_minute, audit_hour, _ = _hour_minute_days(_one_cron(AUDIT))
+    anchor = f"{audit_hour:02d}:{audit_minute:02d}:00Z"
+    assert anchor in text, (
+        f"the freshness check must anchor to the audit's own target time ({anchor}), "
+        "not an arbitrary window"
+    )

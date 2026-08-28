@@ -27,13 +27,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # A run "recent enough" started within the last 6 hours -- wide
-          # enough to cover the audit's own observed scheduling jitter (up to
-          # ~110 minutes late) plus this watchdog's own hour of buffer, narrow
-          # enough that it can never see yesterday's run and wrongly conclude
-          # today already happened. Listing runs only needs read access, so
-          # the automatic token is enough for this half of the job.
-          cutoff=$(date -u -d '6 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          # Anchored to *today's own target time* (01:00 UTC -- must track
+          # real_data_audit.yml's cron hour/minute if that ever changes), not
+          # a rolling window. A rolling "last 6 hours" was tried first and is
+          # exactly what let this miss go undetected: a manual dispatch fired
+          # the evening before can sit well inside a 6-hour window at the
+          # watchdog's 02:00 UTC check without being today's actual run at
+          # all. Anchoring to today's calendar date closes that gap outright.
+          # Listing runs only needs read access, so the automatic token is
+          # enough for this half of the job.
+          cutoff=$(date -u +%Y-%m-%dT01:00:00Z)
           count=$(gh api "repos/${{ github.repository }}/actions/workflows/real_data_audit.yml/runs" \
             -f "created=>=${cutoff}" -f per_page=10 \
             --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')
@@ -54,8 +57,8 @@ jobs:
           # unconfigured is worse than no watchdog, since it looks like
           # protection that was never actually wired up.
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::The audit has not run in the last 6 hours, and WORKFLOW_TRIGGER_PAT is not set, so this watchdog cannot retrigger it. Add a personal access token with 'Actions: read and write' on this repository as a repository secret named WORKFLOW_TRIGGER_PAT (Settings -> Secrets and variables -> Actions)."
+            echo "::error::The audit has not run yet today, and WORKFLOW_TRIGGER_PAT is not set, so this watchdog cannot retrigger it. Add a personal access token with 'Actions: read and write' on this repository as a repository secret named WORKFLOW_TRIGGER_PAT (Settings -> Secrets and variables -> Actions)."
             exit 1
           fi
           gh workflow run real_data_audit.yml --ref main
-          echo "The audit had not run in the last 6 hours -- retriggered it."
+          echo "The audit had not run yet today -- retriggered it."
