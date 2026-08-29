@@ -28,6 +28,11 @@ LAYOUT = {
 }
 GRID = {"vertLines": {"color": "#f6f7f9"}, "horzLines": {"color": "#f6f7f9"}}
 SCALE_BORDER = "#eef0f3"
+#: Head- and foot-room around the plotted range, as a share of panel height.
+#: The library's default leaves enough space below a fast-moving series for the
+#: axis to run down to zero, which spends a third of a price panel on ground the
+#: price never came near.
+SCALE_MARGINS = {"top": 0.12, "bottom": 0.08}
 
 
 @lru_cache(maxsize=1)
@@ -102,8 +107,8 @@ def line_chart(
     autoSize: true,
     layout: {json.dumps(LAYOUT)},
     grid: {json.dumps(GRID)},
-    rightPriceScale: {{borderColor: {json.dumps(SCALE_BORDER)}}},
-    leftPriceScale: {{visible: {left_visible}, borderColor: {json.dumps(SCALE_BORDER)}}},
+    rightPriceScale: {{borderColor: {json.dumps(SCALE_BORDER)}, scaleMargins: {json.dumps(SCALE_MARGINS)}}},
+    leftPriceScale: {{visible: {left_visible}, borderColor: {json.dumps(SCALE_BORDER)}, scaleMargins: {json.dumps(SCALE_MARGINS)}}},
     timeScale: {{borderColor: {json.dumps(SCALE_BORDER)}, rightOffset: 3}},
     crosshair: {{mode: LightweightCharts.CrosshairMode.Normal}}
   }});

@@ -19,6 +19,7 @@ import pandas as pd
 
 from ..actions import with_actions
 from ..data import load_nse_constituents_csv
+from .components import SETUP_CONDITIONS
 
 DATA_DIR = Path("data")
 RESEARCH_PATH = DATA_DIR / "latest_research.csv"
@@ -155,9 +156,31 @@ def _read_research(path: Path, universe: pd.DataFrame) -> pd.DataFrame:
             merged = merged.drop(columns=[alias])
 
     merged["Stage_Label"] = merged["Stage"].map(lambda v: str(v).split(" — ", 1)[0])
+    merged["Setup_Evidence"] = setup_evidence(merged)
     # Action is recomputed from the published columns with the same deterministic
     # function the audit used, so the table and the snapshot cannot disagree.
     return with_actions(merged)
+
+
+def setup_evidence(frame: pd.DataFrame) -> pd.Series:
+    """How many of the four published pre-breakout conditions a stock meets.
+
+    Composed from fields already in the snapshot; it introduces no rule, in the
+    same way the Screener presets do not. Computed here rather than inside the
+    Setups view so every view that renders the Evidence column has the value:
+    the Screener rendered that column against a field only the Setups view
+    created, so every row read as an em dash.
+    """
+    total = pd.Series(0, index=frame.index, dtype=int)
+    for _, column in SETUP_CONDITIONS:
+        if column not in frame.columns:
+            continue
+        if column == "Stage1_Readiness":
+            met = pd.to_numeric(frame[column], errors="coerce") >= 4
+        else:
+            met = frame[column].fillna(False).astype(bool)
+        total = total + met.astype(int)
+    return total
 
 
 @dataclass(frozen=True)

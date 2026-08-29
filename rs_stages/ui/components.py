@@ -119,7 +119,7 @@ def rs_cell(rs: Any) -> str:
     value = to_float(rs)
     if not math.isfinite(value):
         return f'<span style="color:var(--faint)">{DASH}</span>'
-    color = stage_color("Stage 2") if value >= 80 else ("#2D6CDF" if value >= 50 else "#9aa1ac")
+    color = stage_color("Stage 2") if value >= 80 else ("#2465DE" if value >= 50 else "#68717F")
     return (
         f'<span class="ws-rs num">{fmt_rs(value)}</span>'
         f'<span class="ws-rs-bar bar-grow" style="width:{min(100.0, value):.0f}%;background:{color}"></span>'
@@ -133,10 +133,20 @@ def action_chip(action: Any) -> str:
 
 
 def stage_cell(stage: Any) -> str:
+    """Stage in a table row: dot, number, and the name it stands for.
+
+    The name is wrapped so the mobile stylesheet can drop it and keep the row
+    within 390px; the dot already carries the same colour, so nothing is lost
+    beyond the word.
+    """
     key = stage_key(stage)
     if key not in {"Stage 1", "Stage 2", "Stage 3", "Stage 4"}:
         return f'<span style="color:var(--faint)">{DASH}</span>'
-    return f'<span class="ws-stage">{dot(stage_color(stage))}{esc(stage_display(stage))}</span>'
+    name = stage_display(stage).split(" · ")[1]
+    return (
+        f'<span class="ws-stage">{dot(stage_color(stage))}{esc(key)}'
+        f'<span class="stage-name">· {esc(name)}</span></span>'
+    )
 
 
 def symbol_cell(symbol: Any, subtitle: Any, stage: Any) -> str:
@@ -281,7 +291,7 @@ def kv_grid(items: Sequence[tuple[str, str, str, str]]) -> str:
 #: "warn" means True is a caution, "neutral" means True carries no valence.
 STATE_TONES = {
     "good": (POSITIVE, "var(--up-bg)"),
-    "warn": ("#B5781A", "var(--amber-bg)"),
+    "warn": ("#966316", "var(--amber-bg)"),
     "bad": (NEGATIVE, "var(--down-bg)"),
     "neutral": ("var(--sub)", "var(--track)"),
 }
@@ -324,14 +334,14 @@ def evidence_grid(cards: Iterable[str]) -> str:
 STATUS_MARKS = {
     "met": ("✓", POSITIVE, "var(--up-bg)"),
     "unmet": ("✕", NEGATIVE, "var(--down-bg)"),
-    "caution": ("■", "#B5781A", "var(--amber-bg)"),
+    "caution": ("■", "#966316", "var(--amber-bg)"),
     "neutral": ("·", "var(--sub)", "var(--track)"),
 }
 
 
 def signal_line(label: str, value: str, tone: str = "neutral") -> str:
     """One line of the Signal Card: what the measure is, and what it reads."""
-    color = {"good": POSITIVE, "warn": "#B5781A", "bad": NEGATIVE}.get(tone, "var(--ink)")
+    color = {"good": POSITIVE, "warn": "#966316", "bad": NEGATIVE}.get(tone, "var(--ink)")
     return (
         f'<div class="ws-sigline"><span class="ws-sigline-label">{esc(label)}</span>'
         f'<span class="ws-sigline-value" style="color:{color}">{esc(value)}</span></div>'
@@ -343,9 +353,9 @@ def signal_note(kind: str, text: str) -> str:
     if not text:
         return ""
     palette = {
-        "wait": ("#B5781A", "var(--amber-bg)", "Waiting on"),
-        "conflict": ("#2D6CDF", "var(--blue-bg)", "Conflict"),
-        "caution": ("#C2562F", "var(--slip-bg)", "Caution"),
+        "wait": ("#966316", "var(--amber-bg)", "Waiting on"),
+        "conflict": ("#2465DE", "var(--blue-bg)", "Conflict"),
+        "caution": ("#AA4B29", "var(--slip-bg)", "Caution"),
         "source": ("var(--sub)", "var(--track)", "Source"),
     }
     color, background, title = palette[kind]
@@ -409,11 +419,30 @@ SCREENER_COLUMNS = {
     "atr": ("ATR %", "right", True),
 }
 
-#: The pre-breakout view's columns. Deliberately omits Action: §11 assigns every
+#: The Screener's default columns: the momentum evidence and the Action that
+#: interprets it. Named explicitly rather than left to fall back on the whole
+#: SCREENER_COLUMNS map — that fallback silently rendered all seventeen
+#: columns, so the "momentum" default already carried every pre-breakout column
+#: the toggle claims to swap in, and the table ran far past the page width.
+#:
+#: Action sits second, immediately after the symbol. It is the decision column,
+#: and at mobile widths the columns after the third are off-screen until the
+#: reader thinks to scroll a table sideways.
+MOMENTUM_COLUMNS = (
+    "symbol", "action", "rs", "stage", "trend", "ud", "ext", "range", "r3m",
+)
+
+#: The Screener's pre-breakout columns, for the toggle that swaps the evidence.
+PREBREAKOUT_COLUMNS = (
+    "symbol", "action", "rs", "stage", "evidence",
+    "rsline", "contraction", "dryup", "pivot", "template",
+)
+
+#: The Setups view's columns. Deliberately omits Action: §11 assigns every
 #: Stage 1 stock the same label, so showing it beside a readiness ranking would
 #: imply the label were varying with the score. It is not.
 SETUP_COLUMNS = (
-    "symbol", "evidence", "trend", "rs", "stage",
+    "symbol", "evidence", "template", "rs", "stage",
     "rsline", "contraction", "dryup", "pivot", "readiness",
 )
 
@@ -447,7 +476,7 @@ def _cell(key: str, row: pd.Series, trend: Sequence[float] | None) -> str:
         return f'<span class="num" style="color:{color};font-weight:600">{text}</span>'
     if key == "ext":
         value = to_float(row.get("Ext_Pct"))
-        color = "#B5781A" if math.isfinite(value) and value > 20 else signed_color(value)
+        color = "#966316" if math.isfinite(value) and value > 20 else signed_color(value)
         return f'<span class="num" style="color:{color};font-weight:600">{fmt_pct(value)}</span>'
     if key == "range":
         return range_track(row.get("Low_52W"), row.get("Close"), row.get("High_52W"))
@@ -541,13 +570,19 @@ def screener_table(
     trends: dict[str, Sequence[float]] | None = None,
     columns: Sequence[str] | None = None,
     sorted_by: str | None = None,
+    ascending: bool = False,
 ) -> str:
     """Render the dense stock table.
 
     ``trends`` maps symbol to a short close series for the sparkline column; a
     symbol without one shows an em dash rather than a fabricated line.
+
+    ``ascending`` points the sort marker the way the sort actually runs. It was
+    previously drawn as ▼ on every sorted column, so "RS (low to high)" was
+    marked as descending.
     """
-    keys = list(columns or SCREENER_COLUMNS)
+    keys = list(columns or MOMENTUM_COLUMNS)
+    marker = " ▲" if ascending else " ▼"
     header = "".join(
         '<th class="{cls}">{label}</th>'.format(
             cls=" ".join(
@@ -560,7 +595,7 @@ def screener_table(
                     ],
                 )
             ),
-            label=esc(SCREENER_COLUMNS[k][0]) + (" ▼" if sorted_by == k else ""),
+            label=esc(SCREENER_COLUMNS[k][0]) + (marker if sorted_by == k else ""),
         )
         for k in keys
     )
@@ -607,36 +642,63 @@ def _plural(count: Any, noun: str) -> str:
     return f"{number:,} {noun}" if number == 1 else f"{number:,} {noun}s"
 
 
-def industry_table(frame: pd.DataFrame) -> str:
-    """Ranked industry rows: rank, name, median-RS bar, participation, 3M."""
+def industry_table(frame: pd.DataFrame, min_stocks: int = 5) -> str:
+    """Ranked industry rows: rank, name, median-RS bar, Stage 2 share, 3M.
+
+    ``min_stocks`` marks the industries whose median rests on too few
+    constituents to be read as a group reading. They stay in the table — they
+    are real NSE groups — but the row says how thin the basis is instead of
+    presenting a one-stock median as a peer of a 121-stock one.
+
+    The Stage 2 count is shown because ``industry_leadership`` computes it and
+    it is the column a reader actually acts on: how much of the industry is
+    advancing, not only where its median sits.
+    """
     if frame.empty:
         return missing_notice(
             "No industry data in this snapshot.",
             "Industry is the NSE constituent CSV's Industry field; it is not remapped.",
         )
+    has_stage2 = "Stage2" in frame.columns
     head = (
         '<div class="ws-irow-head"><span class="ws-irank">#</span>'
         '<span class="ws-iname">Industry</span>'
         '<span class="ws-irs">Strength (median RS)</span>'
-        '<span class="ws-inum col-hide-sm">Partic.</span>'
+        + ('<span class="ws-inum col-hide-sm">Stage 2</span>' if has_stage2 else "")
+        + '<span class="ws-inum col-hide-sm">Partic.</span>'
         '<span class="ws-inum">3M</span></div>'
     )
     rows = []
     for rank, (_, row) in enumerate(frame.iterrows(), start=1):
         rs = to_float(row.get("Median_RS"))
         width = min(100.0, max(0.0, rs)) if math.isfinite(rs) else 0.0
-        color = POSITIVE if rs >= 80 else ("#2D6CDF" if rs >= 50 else "#9aa1ac")
+        color = POSITIVE if rs >= 80 else ("#2465DE" if rs >= 50 else "#68717F")
         participation = to_float(row.get("Participation_Pct"))
+        stocks = to_float(row.get("Stocks"))
+        thin = math.isfinite(stocks) and stocks < min_stocks
+        basis = _plural(stocks, "stock")
+        if thin:
+            basis += " — too few for a group median"
+        stage2_cell = ""
+        if has_stage2:
+            stage2 = to_float(row.get("Stage2"))
+            stage2_text = f"{int(stage2):,}" if math.isfinite(stage2) else DASH
+            stage2_cell = (
+                '<span class="ws-inum num col-hide-sm" style="color:var(--sub)">'
+                f"{stage2_text}</span>"
+            )
+        row_style = ' style="opacity:.62"' if thin else ""
         rows.append(
-            f'<div class="ws-irow">'
+            f'<div class="ws-irow"{row_style}>'
             f'<span class="ws-irank num">{rank}</span>'
             f'<div class="ws-iname"><a target="_self" '
             f'href="{query_href(view="Industries", industry=row.get("Industry"))}">'
             f'{esc(row.get("Industry"))}</a>'
-            f'<div class="sub num">{_plural(to_float(row.get("Stocks")), "stock")}</div></div>'
+            f'<div class="sub num">{esc(basis)}</div></div>'
             f'<div class="ws-irs"><div class="ws-irs-track col-hide-sm">'
             f'<div class="ws-irs-fill bar-grow" style="width:{width:.1f}%;background:{color}"></div></div>'
             f'<span class="ws-irs-value num">{fmt_rs(rs)}</span></div>'
+            f'{stage2_cell}'
             f'<span class="ws-inum num col-hide-sm" style="color:var(--sub)">'
             f'{fmt_pct(participation, digits=0, signed=False)}</span>'
             f'<span class="ws-inum num" style="color:{signed_color(to_float(row.get("Median_R3M")))};font-weight:600">'

@@ -143,8 +143,8 @@ coverage = SNAP.date_coverage
 if coverage.is_split:
     stamp_detail = (
         f'<span style="color:var(--faint);font-weight:500">· Nifty Total Market '
-        f'({len(SNAP.universe):,}) · {ui.dot("#B5781A", size=6)} '
-        f'<span style="color:#B5781A">{coverage.current_count:,} of '
+        f'({len(SNAP.universe):,}) · {ui.dot("#966316", size=6)} '
+        f'<span style="color:#966316">{coverage.current_count:,} of '
         f'{len(SNAP.universe):,} as of this date, {coverage.lagging_count:,} '
         f'one session behind (provider lag)</span></span>'
     )
@@ -197,7 +197,7 @@ def missing(key: str) -> bool:
 
 # --- shared fragments -------------------------------------------------------
 def regime_card(link: bool = True) -> str:
-    color = {"Broad": POSITIVE, "Mixed": CAUTION, "Narrow": NEGATIVE}.get(BREADTH["regime"], "#9aa1ac")
+    color = {"Broad": POSITIVE, "Mixed": CAUTION, "Narrow": NEGATIVE}.get(BREADTH["regime"], "#68717F")
     link_html = (
         '<a target="_self" href="?view=Market" style="margin-left:auto;font-size:12.5px;'
         'color:var(--ink);font-weight:600;text-decoration:none;'
@@ -286,52 +286,76 @@ def page_dashboard() -> None:
         lagging["Date"] = pd.to_datetime(lagging["Date"]).dt.strftime("%d %b")
         lagging = lagging.sort_values("Symbol")
         items = list(zip(lagging["Symbol"], lagging["Date"]))
+        # One line, then the detail behind a disclosure. The full explanation and
+        # every lagging symbol are still one click away and nothing is withheld,
+        # but the briefing has to open on the market, not on a caveat about the
+        # feed: at 390px the expanded form ran to roughly a thousand pixels and
+        # pushed every decision on this page below two screens of stale tickers.
         write(
             ui.card(
-                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-                f'{ui.dot("#B5781A", size=8)}<div class="ws-eyebrow" style="margin:0;color:#B5781A">'
-                "Not every stock is on today's close</div></div>"
-                f'<div class="ws-note" style="margin-bottom:10px">'
-                f"The price provider updates its feed asynchronously — larger, more liquid names "
-                f"first. <strong>{coverage.current_count:,} of {len(DATA):,}</strong> stocks reflect "
-                f"{fmt_date(coverage.latest)}; <strong>{coverage.lagging_count:,}</strong> "
-                f"({coverage.lagging_pct:.0f}%) still carry their prior session, listed below with "
-                f"the date each is actually on. Every field for a lagging stock is internally "
-                f"consistent for its own date — nothing here is fabricated — but a ranking that "
-                f"compares it to a same-day peer is comparing two different sessions. This is not "
-                f"withheld: waiting for every stock to agree would let one thin name delay the "
-                f"other {len(DATA) - 1:,}."
-                "</div>"
-                + ui.pill_row(items[:25])
+                '<div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap">'
+                f'{ui.dot("#966316", size=8)}'
+                f'<span style="font-size:13px;font-weight:700;color:#966316">'
+                f"{coverage.lagging_count:,} of {len(DATA):,} stocks "
+                f"({coverage.lagging_pct:.0f}%) are one session behind</span>"
+                f'<span class="ws-note" style="flex:1 1 260px">'
+                f"{coverage.current_count:,} reflect {ui.esc(fmt_date(coverage.latest))}; the rest "
+                "still carry their prior session. Each is internally consistent for its own "
+                "date, but a rank that compares the two is comparing two sessions.</span></div>",
+                style="padding:12px 16px",
             )
         )
-        if len(items) > 25:
-            with st.expander(f"{len(items) - 25:,} more lagging symbols"):
-                write(ui.pill_row(items[25:]))
+        with st.expander(
+            f"Why, and which {coverage.lagging_count:,} stocks", expanded=False
+        ):
+            st.caption(
+                "The price provider updates its feed asynchronously, larger and more liquid "
+                "names first, so a share of the universe still carries the previous session "
+                "when the audit runs. Nothing here is fabricated — every field for a lagging "
+                "stock is computed from that stock's own latest completed session. Waiting for "
+                f"every stock to agree would let one thin name delay the other {len(DATA) - 1:,}, "
+                "so the split is published and disclosed instead."
+            )
+            write(ui.pill_row(items))
         st.write("")
 
     write(regime_card())
     st.write("")
+    # These four answer "what does the guide say to do today". The Stage 2 count
+    # and the valid-RS count were here before; both are restated in full by the
+    # posture bar and the action distribution immediately below, so the row was
+    # spending its four slots repeating the two charts under it.
+    counts = DATA["Action"].value_counts()
+    buys = int(counts.get("BUY★", 0)) + int(counts.get("BUY", 0))
+    exits = int(counts.get("SELL", 0)) + int(counts.get("REDUCE", 0))
+    watch = int(counts.get("WATCH★", 0)) + int(counts.get("WATCH", 0))
     write(
         ui.stat_row(
             [
-                ui.stat_card("Valid RS", f"{BREADTH.get('valid_rs', 0):,}", note="scored against the universe"),
                 ui.stat_card(
-                    "Stage 2 — Advancing",
-                    f"{BREADTH['stages']['Stage 2']:,}",
-                    note=f"{BREADTH['stages']['Stage 2'] / max(BREADTH['classified'], 1) * 100:.0f}% of classified stocks",
-                    color=POSITIVE,
+                    "Entries the guide allows",
+                    f"{buys:,}",
+                    note=f"{int(counts.get('BUY★', 0)):,} confirmed, "
+                         f"{int(counts.get('BUY', 0)):,} unconfirmed",
+                    color=POSITIVE if buys else "var(--ink)",
                 ),
                 ui.stat_card(
-                    "Confirmed breakouts",
-                    f"{BREADTH['breakout_confirmed']:,}",
-                    note=f"of {BREADTH['breakout']:,} breakout setups",
-                    color=POSITIVE if BREADTH["breakout_confirmed"] else "var(--ink)",
+                    "Exits the guide requires",
+                    f"{exits:,}",
+                    note=f"{int(counts.get('SELL', 0)):,} sell, "
+                         f"{int(counts.get('REDUCE', 0)):,} reduce",
+                    color=NEGATIVE if exits else "var(--ink)",
+                ),
+                ui.stat_card(
+                    "Bases to watch",
+                    f"{watch:,}",
+                    note="Stage 1, not yet an entry",
+                    color=CAUTION if watch else "var(--ink)",
                 ),
                 ui.stat_card(
                     "Distribution warnings",
                     f"{BREADTH['distribution']:,}",
-                    note="U/D below 0.7",
+                    note="U/D below 0.7, any stage",
                     color=NEGATIVE if BREADTH["distribution"] else "var(--ink)",
                 ),
             ]
@@ -339,7 +363,22 @@ def page_dashboard() -> None:
     )
 
     st.write("")
-    write(ui.card(ui.posture_bar(BREADTH["stages"]) + "<div style='height:14px'></div>" + action_distribution(DATA)))
+    unscored = len(DATA) - int(BREADTH.get("valid_rs", 0))
+    coverage_note = (
+        f'<div class="ws-note" style="margin-top:10px">'
+        f'{BREADTH["classified"]:,} of {len(DATA):,} stocks carry enough history to classify a '
+        f'Stage, and {BREADTH.get("valid_rs", 0):,} carry enough to score RS'
+        + (f" — {unscored:,} do not and are ranked nowhere." if unscored else ".")
+        + "</div>"
+    )
+    write(
+        ui.card(
+            ui.posture_bar(BREADTH["stages"])
+            + "<div style='height:14px'></div>"
+            + action_distribution(DATA)
+            + coverage_note
+        )
+    )
 
     # Leading industries
     industries = industry_leadership(DATA)
@@ -535,6 +574,31 @@ SCREENER_PRESETS = {
 }
 
 
+def _active_refinements() -> str:
+    """Summarise the refinements currently set, for the collapsed expander.
+
+    A filter that is applied but out of sight is worse than no filter at all:
+    the reader sees a short table and no reason for it. The summary is built
+    from session state, so it reflects what the widgets inside will render.
+    """
+    state = st.session_state
+    parts = []
+    stage = state.get("screener_stage")
+    if stage and stage != "All stages":
+        parts.append(str(stage).split(" · ")[0])
+    actions = state.get("screener_action")
+    if actions:
+        parts.append(", ".join(actions) if len(actions) <= 3 else f"{len(actions)} actions")
+    band = state.get("screener_rs")
+    if band and tuple(band) != (1, 99):
+        parts.append(f"RS {band[0]}-{band[1]}")
+    if state.get("screener_liquid"):
+        parts.append("liquid only")
+    if state.get("screener_prebreakout"):
+        parts.append("pre-breakout columns")
+    return " · ".join(parts)
+
+
 def page_screener() -> None:
     heading(
         "Screener",
@@ -543,8 +607,15 @@ def page_screener() -> None:
     )
 
     industries = ["All"] + sorted(DATA["Industry"].dropna().astype(str).unique().tolist())
-    row1 = st.columns([2, 2, 2])
-    query = row1[0].text_input("Search", placeholder="Symbol, company or industry", key="screener_query")
+
+    # Search, preset and sort stay in view; everything else moves behind one
+    # disclosure. Seven stacked control rows ran to roughly 540px on a laptop
+    # and 950px on a phone, so the first result row sat below the fold on both
+    # — a screener whose results you have to scroll to find is not a screener.
+    row1 = st.columns([3, 2, 2])
+    query = row1[0].text_input(
+        "Search", placeholder="Symbol, company or industry", key="screener_query"
+    )
     industry = row1[1].selectbox("Industry", industries, key="screener_industry")
     sort_label = row1[2].selectbox("Sort by", list(SORTS), key="screener_sort")
 
@@ -559,26 +630,32 @@ def page_screener() -> None:
         help="Presets compose existing published fields; they never recompute the RS ranking.",
     )
 
-    stages = st.segmented_control(
-        "Stage",
-        ["All stages"] + [stage_display(s) for s in STAGE_ORDER],
-        default="All stages",
-        key="screener_stage",
-    )
-    actions = st.segmented_control(
-        "Action", ACTION_ORDER, selection_mode="multi", key="screener_action"
-    )
-    row2 = st.columns([3, 2])
-    rs_low, rs_high = row2[0].slider("RS band", 1, 99, (1, 99), key="screener_rs")
-    liquid_only = row2[1].toggle(
-        "Liquid only (20-session traded value above ₹5 Cr)", key="screener_liquid"
-    )
-    prebreakout = st.toggle(
-        "Show pre-breakout evidence instead of momentum",
-        key="screener_prebreakout",
-        help="Swaps the U/D, extension, 52-week range and 3-month columns for the v2.2 "
-             "contraction, volume dry-up, pivot distance and trend-template columns.",
-    )
+    refined = _active_refinements()
+    with st.expander(
+        "Refine — stage, action, RS band, liquidity, columns"
+        + (f"  ·  {refined}" if refined else ""),
+        expanded=bool(refined),
+    ):
+        stages = st.segmented_control(
+            "Stage",
+            ["All stages"] + [stage_display(s) for s in STAGE_ORDER],
+            default="All stages",
+            key="screener_stage",
+        )
+        actions = st.segmented_control(
+            "Action", ACTION_ORDER, selection_mode="multi", key="screener_action"
+        )
+        row2 = st.columns([3, 2])
+        rs_low, rs_high = row2[0].slider("RS band", 1, 99, (1, 99), key="screener_rs")
+        liquid_only = row2[1].toggle(
+            "Liquid only (20-session traded value above ₹5 Cr)", key="screener_liquid"
+        )
+        prebreakout = st.toggle(
+            "Show pre-breakout evidence instead of momentum",
+            key="screener_prebreakout",
+            help="Swaps the U/D, extension, 52-week range and 3-month columns for the v2.2 "
+                 "contraction, volume dry-up, pivot distance and trend-template columns.",
+        )
 
     view = DATA.copy()
     if preset and preset != "None":
@@ -596,8 +673,19 @@ def page_screener() -> None:
         view = view[view["Stage_Label"] == stages.split(" · ")[0]]
     if actions:
         view = view[view["Action"].isin(list(actions))]
+    # A stock whose RS could not be scored has no place on the 1-99 band, and
+    # `between` drops it. At the band's full width that silently removed every
+    # unscored stock from an otherwise unfiltered table, so the Screener
+    # reported fewer stocks than the header's universe with nothing said. The
+    # full band now means "no RS filter"; a narrowed band still excludes them,
+    # and says how many below the table.
     score = pd.to_numeric(view["RS_Score"], errors="coerce")
-    view = view[score.between(rs_low, rs_high)]
+    unscored = int(score.isna().sum())
+    if (rs_low, rs_high) == (1, 99):
+        excluded_unscored = 0
+    else:
+        excluded_unscored = unscored
+        view = view[score.between(rs_low, rs_high)]
     if liquid_only and "Liquid_UI_Filter" in view.columns:
         view = view[view["Liquid_UI_Filter"].fillna(False).astype(bool)]
     if query and query.strip():
@@ -616,6 +704,12 @@ def page_screener() -> None:
         view = view.sort_values(column, ascending=ascending, na_position="last")
 
     total = len(view)
+    unscored_note = (
+        f' · <span style="color:#966316">{unscored:,} stocks carry no RS score and sit '
+        "outside the band</span>"
+        if excluded_unscored
+        else ""
+    )
     pages = max(1, math.ceil(total / PAGE_SIZE))
     page = 1
     if pages > 1:
@@ -625,18 +719,20 @@ def page_screener() -> None:
     window = view.iloc[(int(page) - 1) * PAGE_SIZE : int(page) * PAGE_SIZE]
 
     shown = f"{len(window):,} of {total:,}" if pages > 1 else f"{total:,}"
+    # Say what the filters removed, without repeating the universe when nothing
+    # was removed: "50 of 750 stocks of 750 in the universe" reads as a stutter.
+    narrowed = f" · filtered from {len(DATA):,} in the universe" if total != len(DATA) else ""
     write(
         f'<div class="ws-note" style="margin:2px 0 10px">Showing <b style="color:var(--ink)">{shown}</b> '
-        f"stocks · sorted by {ui.esc(sort_label.lower())} · Action is the guide interpretation of the "
-        "evidence to its left, never a substitute for it.</div>"
+        f"stocks{narrowed} · sorted by {ui.esc(sort_label.lower())} · Action is the guide "
+        f"interpretation of the evidence beside it, never a substitute for it.{unscored_note}</div>"
     )
-    columns = (
-        ("symbol", "trend", "rs", "stage", "action",
-         "rsline", "contraction", "dryup", "pivot", "template")
-        if prebreakout
-        else None
+    columns = ui.PREBREAKOUT_COLUMNS if prebreakout else ui.MOMENTUM_COLUMNS
+    write(
+        ui.screener_table(
+            window, cached_sparklines(), columns=columns, sorted_by=sort_key, ascending=ascending
+        )
     )
-    write(ui.screener_table(window, cached_sparklines(), columns=columns, sorted_by=sort_key))
     st.download_button(
         "Download these results (CSV)",
         view.to_csv(index=False).encode("utf-8"),
@@ -651,6 +747,10 @@ def page_screener() -> None:
 
 
 # --- Industries -------------------------------------------------------------
+#: Constituents an industry needs before its median RS is quoted as leadership.
+#: Below this the median is one or two stocks wearing an industry's name.
+MIN_INDUSTRY_STOCKS = 5
+
 INDUSTRY_SORTS = {
     "Median RS (high to low)": ("Median_RS", False),
     "Median RS (low to high)": ("Median_RS", True),
@@ -673,12 +773,29 @@ def page_industries() -> None:
         write(ui.missing_notice("No industry data.", "The snapshot carries no Industry field."))
         return
 
-    leaders = ", ".join(industries.head(3)["Industry"].astype(str))
+    # A median over one or three constituents is not a median, and ranking it
+    # beside a 121-stock industry put a single stock at the top of a leadership
+    # table. Thin industries stay in the table — they are real NSE groups — but
+    # the headline names only industries with enough constituents for the
+    # median to mean something, and every row shows the count it rests on.
+    broad = industries[industries["Stocks"] >= MIN_INDUSTRY_STOCKS]
+    named = broad if not broad.empty else industries
+    leaders = ", ".join(
+        f'{row["Industry"]} ({int(row["Stocks"])})' for _, row in named.head(3).iterrows()
+    )
+    thin = int((industries["Stocks"] < MIN_INDUSTRY_STOCKS).sum())
+    thin_note = (
+        f' <span style="color:var(--faint)">{thin} of them carry fewer than '
+        f"{MIN_INDUSTRY_STOCKS} constituents, so their median is marked in the table and "
+        "excluded from this line.</span>"
+        if thin
+        else ""
+    )
     write(
         ui.card(
             f'Leadership sits in <b>{ui.esc(leaders)}</b>, ranked by median RS across '
             f'<span class="num">{len(industries)}</span> industries covering '
-            f'<span class="num">{int(industries["Stocks"].sum()):,}</span> stocks.',
+            f'<span class="num">{int(industries["Stocks"].sum()):,}</span> stocks.{thin_note}',
             extra_class="lift",
             style="font-size:13.5px",
         )
@@ -693,7 +810,7 @@ def page_industries() -> None:
     column, ascending = INDUSTRY_SORTS[sort_label]
     if column in industries.columns:
         industries = industries.sort_values(column, ascending=ascending, na_position="last")
-    write(ui.industry_table(industries.reset_index(drop=True)))
+    write(ui.industry_table(industries.reset_index(drop=True), min_stocks=MIN_INDUSTRY_STOCKS))
 
     # Drill-down: the constituents of one industry, without leaving the page.
     if selected and selected != "None":
@@ -749,23 +866,31 @@ def page_market() -> None:
                 "Above the 10-week line",
                 fmt_pct(BREADTH["pct_above_ma_10w"], 0, signed=False).rstrip("%"),
                 suffix="%",
-                note="shorter-term participation",
+                note=f"{BREADTH['above_ma_10w']:,} of {BREADTH['classified']:,} classified",
             )
         )
     cards.append(
         ui.stat_card(
             "Within 3% of the 52-week high",
             f"{BREADTH['near_52w_high']:,}",
-            note=f"{BREADTH['breakout_confirmed']:,} breakouts confirmed",
+            note=f"{BREADTH['near_52w_high'] / max(BREADTH['classified'], 1) * 100:.0f}% of "
+                 "classified stocks",
             color=POSITIVE,
         )
     )
+    leaders = int(BREADTH.get("rs_leaders", 0))
+    lagging = int(BREADTH.get("rs_lagging", 0))
+    scored = int(BREADTH.get("valid_rs", 0))
+    middle = max(0, scored - leaders - lagging)
     cards.append(
         ui.stat_card(
-            "RS leadership / lagging",
-            f"{BREADTH.get('rs_leaders', 0):,}",
-            suffix=f" / {BREADTH.get('rs_lagging', 0):,}",
-            note="RS 80+ versus RS below 50",
+            "RS leadership",
+            f"{leaders:,}",
+            suffix=f" of {scored:,}",
+            # Leaders and laggards alone left the 50-79 band and the unscored
+            # stocks out of a card that read as a two-way split of the universe.
+            note=f"{middle:,} adequate (50-79), {lagging:,} lagging, "
+                 f"{len(DATA) - scored:,} unscored",
         )
     )
     write(ui.stat_row(cards))
@@ -793,7 +918,7 @@ def page_market() -> None:
             else ""
         )
         legend = (
-            '<span class="item"><span style="width:14px;height:2.5px;background:#2D6CDF"></span>'
+            '<span class="item"><span style="width:14px;height:2.5px;background:#2465DE"></span>'
             "Above 30-week</span>"
             '<span class="item"><span style="width:14px;height:2.5px;background:#9DBDF0"></span>'
             "Above 10-week</span>"
@@ -803,10 +928,27 @@ def page_market() -> None:
                 '<span class="item"><span style="width:14px;height:0;border-top:2px dashed '
                 f'#1a1d21"></span>Nifty 500{" · " + ui.esc(ticker) if ticker else ""}</span>'
             )
+        # The counts above come from the snapshot, whose newest information date
+        # is SNAP.decision_date. The series below comes from breadth_history,
+        # which drops a session the panel covers for less than half the
+        # universe — so its last point is routinely one session older. Two
+        # stacked readings of the same measure must not silently sit on
+        # different dates.
+        history_end = pd.to_datetime(history["Date"], errors="coerce").max()
         detail = (
             f"{len(history)} completed sessions, each counted as of that session. The series is a "
             "stack of point-in-time counts, not one snapshot projected backwards."
         )
+        if pd.notna(history_end) and decision is not None and (
+            pd.Timestamp(history_end).normalize() != pd.Timestamp(decision).normalize()
+        ):
+            detail += (
+                f" This series ends at {fmt_date(history_end)}, one session behind the "
+                f"{fmt_date(decision)} counts above it: a session is charted only once the "
+                "provider has published it for at least half the universe, and the newest "
+                "session has not reached that yet. The last point and the cards above are "
+                "therefore different sessions, not a disagreement."
+            )
         if benchmark:
             detail += (
                 " Breadth is a percentage on the left axis; the index is a price level on the "
@@ -844,7 +986,7 @@ def _line_chart(
     index gets the right-hand axis and breadth keeps the left.
     """
     series = [
-        {"data": series_30w, "color": "#2D6CDF", "last_value": True, "scale": "left"},
+        {"data": series_30w, "color": "#2465DE", "last_value": True, "scale": "left"},
         {"data": series_10w, "color": "#9DBDF0", "scale": "left"},
     ]
     if benchmark:
@@ -888,9 +1030,21 @@ def page_movers() -> None:
         f'<b class="num">{len(payload["rows"])}</b> {ui.esc(label)}'
         for label, payload in groups.items()
     ]
+    # The groups are not a partition and the counts must not read as one: a
+    # stock that entered Stage 2 almost always changed Action too, so summing
+    # the counts double-counts it. State the distinct stocks that moved at all.
+    moved = set()
+    for payload in groups.values():
+        moved.update(payload["rows"]["Symbol"].astype(str))
+    events = sum(len(payload["rows"]) for payload in groups.values())
     write(
         ui.card(
-            f'Of <span class="num">{len(DATA):,}</span> stocks: ' + " · ".join(parts) + ".",
+            f'<span class="num">{len(moved):,}</span> of <span class="num">{len(DATA):,}</span> '
+            f'stocks changed state, across <span class="num">{events:,}</span> group entries: '
+            + " · ".join(parts)
+            + '.<div class="ws-note" style="margin-top:8px">A stock can appear in more than one '
+            "group — entering Stage 2 usually changes its Action as well — so the counts overlap "
+            "and do not sum to the stocks that moved.</div>",
             extra_class="lift",
             style="font-size:13.5px",
         )
@@ -1311,38 +1465,48 @@ def _prebreakout_section(row: pd.Series) -> None:
     score = pd.to_numeric(row.get("Trend_Template_Score"), errors="coerce")
     readiness = pd.to_numeric(row.get("Stage1_Readiness"), errors="coerce")
 
+    # evidence_card's third element is the definition printed under the label,
+    # exactly as the Calculation detail cards below use it. These rows were
+    # passing a tone word ("good" / "neutral") into that slot, so the card
+    # printed the literal words "good" and "neutral" where every other card on
+    # the page prints what the measure means.
     cards = [
         ui.evidence_card(
             "Contraction and volume",
             [
                 ("Range vs base start", num(ratio, "×"),
-                 "good" if pd.notna(ratio) and ratio <= 0.60 else "neutral"),
+                 "Last block's high-low range against the first. At or below 0.60× is a "
+                 "tightening base."),
                 ("Volume dry-up", num(dryup, "×"),
-                 "good" if pd.notna(dryup) and dryup <= 0.80 else "neutral"),
-                ("Successive contractions", num(row.get("VCP_Contractions"), digits=0), "neutral"),
-                ("ATR", num(row.get("ATR_Pct"), "%", 1), "neutral"),
+                 "Last ten sessions against the fifty before them. At or below 0.80× is "
+                 "supply drying up."),
+                ("Successive contractions", num(row.get("VCP_Contractions"), digits=0),
+                 "How many times the range tightened against the block before it."),
+                ("ATR", num(row.get("ATR_Pct"), "%", 1),
+                 "Wilder's 14-session average true range, as a share of the close."),
                 ("Setup", "Yes" if bool(row.get("VCP_Setup")) else "No",
-                 "good" if bool(row.get("VCP_Setup")) else "neutral"),
+                 "Contraction, dry-up and at least two successive contractions, together."),
             ],
         ),
         ui.evidence_card(
             "Pivot and template",
             [
-                ("Base pivot", num(row.get("VCP_Pivot")), "neutral"),
+                ("Base pivot", fmt_price(row.get("VCP_Pivot")),
+                 "The highest high of the 50-session base — the buy point at its top."),
                 (
                     "Distance to pivot",
                     "Through it" if pd.notna(to_pivot) and to_pivot <= 0 else num(to_pivot, "%", 1),
-                    "good" if pd.notna(to_pivot) and to_pivot <= 3.0 else "neutral",
+                    "How far the close still has to travel to reach the pivot.",
                 ),
                 (
                     "Trend template",
-                    "—" if pd.isna(score) else f"{int(score)} of 8",
-                    "good" if pd.notna(score) and score == 8 else "neutral",
+                    theme.DASH if pd.isna(score) else f"{int(score)} of 8",
+                    "Minervini's eight criteria, itemized in the checklist below.",
                 ),
                 (
                     "Stage 1 readiness",
                     "Not applicable" if pd.isna(readiness) else f"{int(readiness)} of 5",
-                    "good" if pd.notna(readiness) and readiness >= 4 else "neutral",
+                    "Counted for Stage 1 stocks only; blank elsewhere, which is not a zero.",
                 ),
             ],
         ),
@@ -1404,7 +1568,7 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
             'border-radius:2px"></span>Close</span>'
             '<span class="item"><span style="width:14px;height:2px;background:#9DBDF0;'
             'border-radius:2px"></span>10-week line</span>'
-            '<span class="item"><span style="width:14px;border-top:2px dashed #2D6CDF"></span>'
+            '<span class="item"><span style="width:14px;border-top:2px dashed #2465DE"></span>'
             "30-week line</span>"
             f'<span class="item num" style="margin-left:auto;color:var(--faint)">{len(frame)} '
             "completed sessions</span></div>",
@@ -1425,7 +1589,7 @@ def _stock_chart(symbol: str, row: pd.Series) -> None:
                 },
                 {
                     "data": [{"time": p["time"], "value": p["MA_30W"]} for p in points if "MA_30W" in p],
-                    "color": "#2D6CDF",
+                    "color": "#2465DE",
                     "dashed": True,
                 },
             ],
@@ -1610,23 +1774,10 @@ def page_setups() -> None:
     view = DATA.copy()
     total_universe = len(view)
 
-    # How many of the four published conditions a stock satisfies at once.
-    # Composed from fields already in the snapshot — this introduces no new
-    # rule, in the same way the Screener presets do not. The sections are not
-    # alternatives to choose between: they sit at different distances from the
-    # same move, so a name meeting several is carrying more evidence than a
-    # name meeting one, and that was invisible while each section was its own
-    # separate list.
-    def _met(frame: pd.DataFrame, field: str) -> pd.Series:
-        if field not in frame.columns:
-            return pd.Series(False, index=frame.index)
-        if field == "Stage1_Readiness":
-            return pd.to_numeric(frame[field], errors="coerce") >= 4
-        return frame[field].fillna(False).astype(bool)
-
-    view["Setup_Evidence"] = sum(
-        _met(view, field).astype(int) for _, field in ui.SETUP_CONDITIONS
-    )
+    # Setup_Evidence — how many of the four published conditions a stock
+    # satisfies at once — is computed once in the loader, so the Screener's
+    # Evidence column and this view's ranking read the same field rather than
+    # this page creating one the Screener could not see.
 
     groups = st.segmented_control(
         "Setup",
@@ -1691,6 +1842,15 @@ def page_setups() -> None:
         view = view[view["Liquid_UI_Filter"].fillna(False).astype(bool)]
     if industry != "All":
         view = view[view["Industry"].astype(str) == industry]
+    # The pool the condition was actually evaluated over, after the liquidity
+    # and industry filters. Reporting the numerator against the full 750 while
+    # a filter was on described a search that had not been run.
+    pool = len(view)
+    pool_note = (
+        f"{pool:,} after the filters above, of {total_universe:,} in the universe"
+        if pool != total_universe
+        else f"{total_universe:,} constituents"
+    )
     view = predicate(view)
 
     column, ascending = SETUP_SORTS[sort_label]
@@ -1708,20 +1868,21 @@ def page_setups() -> None:
             ui.missing_notice(
                 f"No stock currently matches “{ui.esc(label)}”.",
                 "This is a real reading of today's snapshot, not a missing artifact: the "
-                f"condition was evaluated across all {total_universe:,} constituents and none "
-                "met it. Setups of this kind are intermittent by nature — a market with no "
-                "coiling leaders is information, not an error.",
+                f"condition was evaluated across {pool_note} and none met it. Setups of this "
+                "kind are intermittent by nature — a market with no coiling leaders is "
+                "information, not an error.",
             )
         )
         return
 
     write(
         f'<div class="ws-note" style="margin:2px 0 10px"><b style="color:var(--ink)">{len(view):,}</b> '
-        f"of {total_universe:,} constituents · sorted by {ui.esc(sort_label.lower())}</div>"
+        f"match · searched over {pool_note} · sorted by {ui.esc(sort_label.lower())}</div>"
     )
     write(
         ui.screener_table(
-            view.head(PAGE_SIZE), cached_sparklines(), columns=ui.SETUP_COLUMNS
+            view.head(PAGE_SIZE), cached_sparklines(), columns=ui.SETUP_COLUMNS,
+            sorted_by=None,
         )
     )
     if len(view) > PAGE_SIZE:

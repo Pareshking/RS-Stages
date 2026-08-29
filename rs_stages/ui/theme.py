@@ -20,10 +20,10 @@ import pandas as pd
 # One colour per locked Stage, reused everywhere that Stage appears so a dot in
 # a table row and a heading on the stock page always mean the same thing.
 STAGE_COLORS = {
-    "Stage 1": "#2D6CDF",
-    "Stage 2": "#07976B",
-    "Stage 3": "#C98A1E",
-    "Stage 4": "#E0524D",
+    "Stage 1": "#2465DE",
+    "Stage 2": "#067C58",
+    "Stage 3": "#A87313",
+    "Stage 4": "#CC2924",
 }
 STAGE_NAMES = {
     "Stage 1": "Basing",
@@ -35,24 +35,24 @@ STAGE_NAMES = {
 #: Action colour and chip background, following docs/UI_SPEC.md's visual
 #: language: green buy, blue hold, amber wait/watch, orange reduce, red exit.
 ACTION_STYLES = {
-    "BUY★": ("#07976B", "var(--up-bg)"),
-    "BUY": ("#07976B", "var(--up-bg)"),
-    "HOLD": ("#2D6CDF", "var(--blue-bg)"),
-    "WAIT": ("#B5781A", "var(--amber-bg)"),
-    "WATCH★": ("#B5781A", "var(--amber-bg)"),
-    "WATCH": ("#B5781A", "var(--amber-bg)"),
-    "REDUCE": ("#C2562F", "var(--slip-bg)"),
-    "SELL": ("#E0524D", "var(--down-bg)"),
-    "AVOID": ("#E0524D", "var(--down-bg)"),
+    "BUY★": ("#067C58", "var(--up-bg)"),
+    "BUY": ("#067C58", "var(--up-bg)"),
+    "HOLD": ("#2465DE", "var(--blue-bg)"),
+    "WAIT": ("#966316", "var(--amber-bg)"),
+    "WATCH★": ("#966316", "var(--amber-bg)"),
+    "WATCH": ("#966316", "var(--amber-bg)"),
+    "REDUCE": ("#AA4B29", "var(--slip-bg)"),
+    "SELL": ("#CC2924", "var(--down-bg)"),
+    "AVOID": ("#CC2924", "var(--down-bg)"),
 }
 
-POSITIVE = "#07976B"
-NEGATIVE = "#E0524D"
-CAUTION = "#B5781A"
-NEUTRAL = "#2D6CDF"
+POSITIVE = "#067C58"
+NEGATIVE = "#CC2924"
+CAUTION = "#966316"
+NEUTRAL = "#2465DE"
 
 #: RS bands are the locked v2 interpretation, not the retired 85/70 thresholds.
-RS_BANDS = ((80, "Leadership", POSITIVE), (50, "Adequate", NEUTRAL), (0, "Lagging", "#9aa1ac"))
+RS_BANDS = ((80, "Leadership", POSITIVE), (50, "Adequate", NEUTRAL), (0, "Lagging", "#68717F"))
 
 
 def stage_key(value: Any) -> str:
@@ -62,7 +62,7 @@ def stage_key(value: Any) -> str:
 
 
 def stage_color(value: Any) -> str:
-    return STAGE_COLORS.get(stage_key(value), "#9aa1ac")
+    return STAGE_COLORS.get(stage_key(value), "#68717F")
 
 
 def stage_display(value: Any) -> str:
@@ -82,11 +82,11 @@ def rs_band(rs: Any) -> tuple[str, str]:
     """Return the (band name, colour) for an RS score."""
     value = to_float(rs)
     if not math.isfinite(value):
-        return "Unavailable", "#9aa1ac"
+        return "Unavailable", "#68717F"
     for threshold, name, color in RS_BANDS:
         if value >= threshold:
             return name, color
-    return "Unavailable", "#9aa1ac"
+    return "Unavailable", "#68717F"
 
 
 # --- number formatting ------------------------------------------------------
@@ -193,8 +193,11 @@ CSS = """
 :root{
   --ease:cubic-bezier(.22,1,.36,1);
   --page:#f4f5f7;--paper:#fbfcfd;--card:#fff;
-  --ink:#1a1d21;--sub:#6b7280;--faint:#9aa1ac;
+  --ink:#1a1d21;--sub:#6b7280;--faint:#68717F;
   --rule:#eef0f3;--rule-strong:#e4e7eb;--edge:#e2e5ea;--track:#eaecef;--row-hover:#fafbfc;
+  /* An unfilled slot in a counted meter (evidence bars, readiness dots). Without
+     it those meters rendered the filled slots only, so '2 of 4' looked like '2'. */
+  --line:#dfe3e8;
   --up-bg:#dcf5ea;--down-bg:#fbe7e5;--blue-bg:#e6eefb;--amber-bg:#fbefd6;--teal-bg:#d6f0f1;--slip-bg:#fbe3d8;--bar-bg:#e8edf6;
 }
 html,body,[class*="css"],.stApp,button,input,select,textarea{
@@ -212,13 +215,26 @@ html,body,[class*="css"],.stApp,button,input,select,textarea{
 .ws-brand,.ws-sym-cell,.ws-pill-link,.ws-iname a,.ws-shelf{text-decoration:none !important}
 
 /* --- header ------------------------------------------------------------- */
-.ws-header{margin:0 -20px 0;background:var(--card);border-bottom:1px solid var(--rule)}
+/* Sticky, with the section nav beneath it: the pages run to several screens
+   and the nav used to scroll away, so changing section meant scrolling back
+   to the top first. z-index sits above the cards and below Streamlit's own
+   overlays (menus, tooltips). */
+.ws-header{margin:0 -20px 0;background:var(--card);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:60}
 .ws-header-inner{max-width:1100px;margin:0 auto;padding:13px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+div[data-testid="stElementContainer"]:has(>div>div[data-testid="stSegmentedControl"] [aria-label="Section"]),
+div[data-testid="stElementContainer"]:has(>div>div[data-testid="stSegmentedControl"]){scroll-margin-top:64px}
 .ws-brand{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--ink)}
 .ws-mark{width:30px;height:30px;border-radius:9px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;letter-spacing:-.02em}
 .ws-wordmark{font-weight:800;font-size:18px;letter-spacing:-.5px;line-height:1}
 .ws-tagline{font-size:10.5px;color:var(--faint);font-weight:600;margin-top:2px}
-.ws-stamp{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);font-weight:600}
+.ws-stamp{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);font-weight:600;flex-wrap:wrap}
+@media (max-width:640px){
+  .ws-header-inner{padding:10px 16px;gap:6px}
+  .ws-stamp{font-size:11px;gap:6px;width:100%}
+  .ws-wordmark{font-size:16px}
+  .ws-tagline{display:none}
+  div[data-testid="stSegmentedControl"] button{padding:5px 11px !important;font-size:12.5px !important}
+}
 .ws-dot{width:8px;height:8px;border-radius:8px;display:inline-block;flex-shrink:0}
 
 /* --- page furniture ----------------------------------------------------- */
@@ -261,6 +277,7 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-tile{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:-.3px}
 .ws-sym{font-weight:700;font-size:13.5px;line-height:1.2}
 .ws-sym-sub{font-size:10.5px;color:var(--faint);line-height:1.2}
+.ws-sub{font-size:10.5px;color:var(--faint);line-height:1.25;font-weight:500;margin-top:1px}
 .ws-rs{font-weight:700;font-size:14.5px}
 .ws-rs-bar{display:block;height:3px;max-width:60px;border-radius:3px;margin-top:4px;opacity:.55}
 .ws-chip{font-size:12px;font-weight:700;padding:3px 10px;border-radius:7px;white-space:nowrap;display:inline-block}
@@ -269,7 +286,20 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-range-track{position:relative;flex:1;height:3px;border-radius:3px;background:var(--track)}
 .ws-range-dot{position:absolute;top:50%;width:7px;height:7px;border-radius:7px;background:var(--ink);transform:translate(-50%,-50%)}
 .ws-range-cap{font-size:9.5px;color:var(--faint)}
-@media (max-width:640px){.col-hide-sm{display:none !important}}
+@media (max-width:640px){
+  .col-hide-sm{display:none !important}
+  /* With the hide-on-mobile columns gone only four remain, so the 680px floor
+     was forcing a sideways scroll that pushed Action — the decision column —
+     off-screen with no affordance that it was there. */
+  table.ws-table{min-width:0}
+  table.ws-table th,table.ws-table td{padding:11px 9px}
+  table.ws-table td{font-size:12.5px}
+  .ws-tile{width:26px;height:26px;border-radius:8px;font-size:11px}
+  .ws-sym-cell{gap:8px}
+  /* "Stage 2 · Advancing" does not fit beside a symbol and an Action chip at
+     390px; the dot already carries the colour, so the row keeps the number. */
+  .ws-stage .stage-name{display:none}
+}
 
 /* --- shelves, chips, stat cards ----------------------------------------- */
 .ws-chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -282,6 +312,16 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-shelf-count{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:20px;flex:0 0 auto}
 .ws-stat-row{display:flex;gap:12px;flex-wrap:wrap}
 .ws-stat{background:var(--card);border:1px solid var(--rule);border-radius:14px;padding:15px 16px;flex:1 1 170px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+/* 170px cannot fit two across a 390px screen minus gutters, so the row broke
+   to one card per line and four numbers cost four screens of scrolling. */
+@media (max-width:640px){
+  .ws-stat-row{gap:10px}
+  .ws-stat{flex:1 1 calc(50% - 5px);min-width:0;padding:12px 13px}
+  .ws-stat-value{font-size:24px;letter-spacing:-.6px}
+  .ws-stat-value small{font-size:13px}
+  .ws-stat-label,.ws-stat-note{font-size:11px}
+  .ws-stat-note{line-height:1.4}
+}
 .ws-stat-label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);font-weight:600;margin-bottom:8px}
 .ws-stat-value{font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1}
 .ws-stat-value small{font-size:16px;font-weight:700}

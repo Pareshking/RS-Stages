@@ -42,12 +42,17 @@ def _rendered_text(at: AppTest) -> str:
     return " ".join(m.value for m in at.markdown)
 
 
+#: The phrase the Dashboard banner uses to disclose a split universe. Asserted
+#: on rather than a headline, because the headline is presentation and this is
+#: the invariant: a split snapshot must say that some stocks are a session old.
+DISCLOSURE = "one session behind"
+
+
 def test_header_and_dashboard_agree_with_the_file_on_disk():
     is_split, current, lagging = _expected_coverage()
     text = _rendered_text(_app("Dashboard"))
-    disclosed = "Not every stock is on today's close" in text
 
-    assert disclosed == is_split
+    assert (DISCLOSURE in text) == is_split
     if is_split:
         assert f"{current:,}" in text
         assert f"{lagging:,}" in text
@@ -59,5 +64,5 @@ def test_a_uniform_snapshot_never_shows_the_lag_banner():
     if is_split:
         return  # today's data is split; the positive case is covered elsewhere
     text = _rendered_text(_app("Dashboard"))
-    assert "Not every stock is on today's close" not in text
+    assert DISCLOSURE not in text
     assert "provider lag" not in text.lower()

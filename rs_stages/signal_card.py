@@ -217,10 +217,14 @@ def oneil_line(row: Any) -> str:
     parts: list[str] = []
     rs = _num(row.get("RS_Score"))
     if math.isfinite(rs):
+        # Both branches must read as a conclusion about *this* stock. The met
+        # branch previously restated the rule ("leadership requires RS >= 80"),
+        # which under a green checkmark reads as the criterion having failed.
         parts.append(
-            "O'Neil: leadership requires RS ≥ 80"
+            f"O'Neil: RS {rs:.0f} clears the 80 leadership band"
             if rs >= RS_LEADERSHIP
-            else "O'Neil: buy leaders, not laggards"
+            else f"O'Neil: RS {rs:.0f} is short of the 80 leadership band — buy leaders, "
+            "not laggards"
         )
     if bool(row.get("RS_Line_NH_Before_Price")):
         parts.append(

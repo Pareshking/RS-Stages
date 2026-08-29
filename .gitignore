@@ -6,3 +6,7 @@ __pycache__/
 # It is a regenerated binary Git cannot delta, so committing it would add a fresh
 # ~0.9 MB blob to history on every audit run, permanently.
 data/price_panel.npz
+
+# Local virtualenvs.
+.venv/
+venv/
