@@ -1,14 +1,28 @@
 name: Real Data Research Audit
 
 on:
-  # 01:00 UTC is 6:30 IST the *next* calendar day — run the morning after each
+  # 02:30 UTC is 8:00 IST the *next* calendar day — run the morning after each
   # session, not the same evening. Three consecutive sessions (24->25, 25->26,
   # 26->27 Aug 2026) found the price provider still hadn't posted the day's
   # close by 23:45 IST same-day, so the run fell back to the prior session
-  # every time. Moving to the next morning gives the provider roughly 15 hours
+  # every time. Moving to the next morning gives the provider roughly 16 hours
   # after the 15:30 IST close instead of about 8, which is the actual fix —
   # the boundary logic was never wrong, the provider just needed more time
   # than a same-evening run gave it. See DECISION_LOG D-2.2.12.
+  #
+  # Moved again from 01:00 to 02:30 UTC (D-2.2.14). The next-morning run still
+  # found the provider had published the latest session for only a third of the
+  # universe: 261 of 750 on the 29 Aug 2026 run, leaving 489 stocks a session
+  # behind inside one cross-sectional RS ranking. 90 more minutes is the
+  # cheapest thing to try, and it stays well inside the pre-market window — the
+  # run needs about three minutes and the NSE opens at 09:15 IST / 03:45 UTC,
+  # so publication lands around 08:20 IST with an hour to spare.
+  #
+  # Whether 90 minutes is enough is a question about a third party's publishing
+  # curve, and arguing about it is worth less than measuring it: every run now
+  # appends its own split to data/freshness_history.csv and warns when the
+  # lagging share exceeds MAX_LAGGING_SHARE, so the next move is made from
+  # evidence rather than from another estimate.
   #
   # Day-of-week is shifted by one accordingly: a Monday session is picked up
   # Tuesday morning, ... a Friday session Saturday morning. Mon-Fri sessions
@@ -17,7 +31,7 @@ on:
   # is now the *Saturday* run that lands after it with margin, not a same-day
   # Friday one — see tests/test_workflow_scheduling.py.
   schedule:
-    - cron: "0 1 * * 2-6"
+    - cron: "30 2 * * 2-6"
   workflow_dispatch:
     inputs:
       decision_date:
@@ -97,7 +111,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest_research.csv \
                   data/previous_research.csv \
-                  data/breadth_history.csv
+                  data/breadth_history.csv \
+                  data/freshness_history.csv
           if git diff --cached --quiet; then
             echo "Validated research snapshot unchanged."
             exit 0
@@ -113,9 +128,9 @@ jobs:
           # draw through: the live terminal loses every chart until someone
           # re-runs by hand.
           #
-          # The audit writes only the three research CSVs and the universe
-          # refresh writes only the constituent list, so rebasing onto whatever
-          # landed can never conflict.
+          # The audit writes only its own four CSVs and the universe refresh
+          # writes only the constituent list, so rebasing onto whatever landed
+          # can never conflict.
           for attempt in 1 2 3 4 5; do
             if git push; then
               echo "Snapshot published on attempt $attempt."
@@ -136,4 +151,5 @@ jobs:
             data/previous_research.csv
             data/price_panel.npz
             data/breadth_history.csv
+            data/freshness_history.csv
           retention-days: 30

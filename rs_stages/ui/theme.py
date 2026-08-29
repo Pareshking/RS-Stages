@@ -265,6 +265,9 @@ div[data-testid="stElementContainer"]:has(>div>div[data-testid="stSegmentedContr
 .ws-table-wrap{background:var(--card);border:1px solid var(--rule);border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,.05)}
 .ws-scroll{overflow-x:auto}
 table.ws-table{width:100%;border-collapse:collapse;min-width:680px}
+/* The caption names the table for a screen reader without repeating a heading
+   the sighted reader already has directly above it. */
+table.ws-table caption{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 table.ws-table thead tr{background:var(--paper);border-bottom:1px solid var(--rule)}
 table.ws-table th{text-align:left;padding:12px 13px;font-size:11.5px;font-weight:600;color:var(--sub);white-space:nowrap}
 table.ws-table th.right,table.ws-table td.right{text-align:right}
@@ -282,6 +285,10 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-rs-bar{display:block;height:3px;max-width:60px;border-radius:3px;margin-top:4px;opacity:.55}
 .ws-chip{font-size:12px;font-weight:700;padding:3px 10px;border-radius:7px;white-space:nowrap;display:inline-block}
 .ws-stage{display:flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap}
+/* Stage carries a glyph as well as a colour, so the four remain separable
+   without colour vision. Sized to sit on the same baseline as the dot it
+   replaced. */
+.ws-stage-mark{border-radius:5px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:8.5px;line-height:1;font-weight:700}
 .ws-range{display:flex;align-items:center;gap:6px;width:96px}
 .ws-range-track{position:relative;flex:1;height:3px;border-radius:3px;background:var(--track)}
 .ws-range-dot{position:absolute;top:50%;width:7px;height:7px;border-radius:7px;background:var(--ink);transform:translate(-50%,-50%)}
@@ -332,6 +339,38 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 .ws-segbar{display:flex;height:9px;border-radius:6px;overflow:hidden;gap:2px;margin-top:11px}
 .ws-segbar div{opacity:.9;border-radius:3px}
 
+/* --- industry map -------------------------------------------------------- */
+/* Tiles are absolutely positioned as percentages of the container, so the map
+   reflows with the column instead of needing a fixed pixel canvas. The 2px
+   inset is the surface gap that keeps adjacent fills from reading as one. */
+.ws-map{position:relative;width:100%;border-radius:10px;overflow:hidden;background:var(--page)}
+/* Each tile is a query container so its own rendered size decides how much
+   label it shows. The server cannot know that size: the same percentage is a
+   comfortable box at 1100px and a sliver at 390px, and a pixel guess made in
+   Python clipped names off the top of short tiles at one width or the other. */
+.ws-map-tile{position:absolute;display:flex;flex-direction:column;justify-content:flex-end;
+  padding:7px 8px;overflow:hidden;text-decoration:none;color:var(--ink);
+  border:2px solid var(--card);border-radius:5px;transition:filter .16s var(--ease);
+  container-type:size}
+@container (max-height:58px){.ws-map-name{display:none}}
+@container (max-width:88px){.ws-map-name{display:none}}
+@container (max-height:30px){.ws-map-rs,.ws-map-n{display:none}}
+@container (max-width:40px){.ws-map-rs,.ws-map-n{display:none}}
+@container (max-height:74px){.ws-map-n{display:none}}
+.ws-map-tile:hover{filter:brightness(.94)}
+.ws-map-tile:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}
+.ws-map-name{font-size:10.5px;font-weight:700;line-height:1.15;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow-wrap:anywhere}
+.ws-map-rs{font-size:16px;font-weight:800;line-height:1.05;letter-spacing:-.4px;margin-top:2px}
+.ws-map-n{font-size:9.5px;font-weight:600;opacity:.72;line-height:1.2}
+.ws-map-legend{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-top:11px}
+.ws-map-scale{display:flex;align-items:center;gap:7px}
+.ws-map-scale .ramp{width:120px;height:8px;border-radius:5px;display:inline-block}
+.ws-map-scale .cap{font-size:11px;color:var(--faint);font-weight:600}
+@media (max-width:640px){.ws-map-rs{font-size:13px}.ws-map-name{font-size:9.5px}}
+
 /* --- industry / sector row ---------------------------------------------- */
 .ws-irow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-top:1px solid var(--rule)}
 .ws-irow-head{display:flex;align-items:center;gap:12px;padding:8px 4px 6px;font-size:11.5px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
@@ -347,10 +386,6 @@ table.ws-table td{padding:12px 13px;font-size:13px;vertical-align:middle}
 @media (max-width:640px){.ws-iname{flex:1 1 auto}.ws-irs{flex:0 0 auto;min-width:0}}
 
 /* --- signal card (guide Option B) ---------------------------------------- */
-.ws-sigline{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--rule)}
-.ws-sigline:last-child{border-bottom:0}
-.ws-sigline-label{font-size:12.5px;color:var(--sub);font-weight:600}
-.ws-sigline-value{font-size:13.5px;font-weight:700;text-align:right}
 .ws-signote{border:1px solid;border-radius:10px;padding:10px 13px;margin-top:9px;display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
 .ws-signote-title{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;flex-shrink:0}
 .ws-signote-body{font-size:12.5px;color:var(--ink);line-height:1.55;flex:1 1 220px;min-width:0}
@@ -419,9 +454,13 @@ def collapse_blank_lines(markup: str) -> str:
 
 
 FOOTER = (
-    '<div class="ws-foot"><b>Research and decision-support software — not investment advice, '
+    '<div class="ws-foot" role="contentinfo"><b>Research and decision-support software — not investment advice, '
     "and not a recommendation to buy or sell.</b> Relative strength and Stage are descriptive "
     "measures of completed price behaviour, not predictions of future returns. Every figure is "
     "derived from the validated repository snapshot for the stated decision date. Verify the "
-    "underlying data, methodology and current market conditions before acting.</div>"
+    "underlying data, methodology and current market conditions before acting."
+    '<div style="margin-top:10px">RS-Stages · end-of-day NSE data via yfinance · '
+    "visual system after the WealthStar reference terminal · "
+    "quantitative method after Weinstein, O'Neil and Minervini, as set out in Method."
+    "</div></div>"
 )

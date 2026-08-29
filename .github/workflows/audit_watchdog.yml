@@ -1,7 +1,7 @@
 name: Audit Watchdog
 
 on:
-  # An hour after the audit's own 01:00 UTC target, same days it runs. GitHub
+  # 40 minutes after the audit's own 02:30 UTC target, same days it runs. GitHub
   # documents schedule as best-effort and known to drop a firing outright, not
   # only delay it -- three sessions running (24->25, 25->26, 26->27 Aug 2026)
   # the audit landed a session behind because the provider hadn't posted yet,
@@ -10,7 +10,7 @@ on:
   # the second failure: if nothing ran, retrigger it rather than wait for
   # someone to notice a stale site. See DECISION_LOG D-2.2.13.
   schedule:
-    - cron: "0 2 * * 2-6"
+    - cron: "10 3 * * 2-6"
   workflow_dispatch:
 
 permissions:
@@ -27,16 +27,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Anchored to *today's own target time* (01:00 UTC -- must track
+          # Anchored to *today's own target time* (02:30 UTC -- must track
           # real_data_audit.yml's cron hour/minute if that ever changes), not
           # a rolling window. A rolling "last 6 hours" was tried first and is
           # exactly what let this miss go undetected: a manual dispatch fired
           # the evening before can sit well inside a 6-hour window at the
-          # watchdog's 02:00 UTC check without being today's actual run at
+          # watchdog's own check without being today's actual run at
           # all. Anchoring to today's calendar date closes that gap outright.
           # Listing runs only needs read access, so the automatic token is
           # enough for this half of the job.
-          cutoff=$(date -u +%Y-%m-%dT01:00:00Z)
+          cutoff=$(date -u +%Y-%m-%dT02:30:00Z)
           count=$(gh api "repos/${{ github.repository }}/actions/workflows/real_data_audit.yml/runs" \
             -f "created=>=${cutoff}" -f per_page=10 \
             --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')

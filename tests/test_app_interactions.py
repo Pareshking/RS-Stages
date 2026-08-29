@@ -67,15 +67,37 @@ def test_clearing_the_industry_selection_hides_the_drill_down():
 
 
 def test_movers_puts_every_group_member_somewhere_reachable():
-    """A group larger than the inline cap must expose the rest, not drop it."""
-    at = _app("Movers")
-    body = _markdown(at)
-    if "Nothing changed state" in body or "unavailable" in body:
+    """A group larger than the inline cap must expose the rest, not drop it.
+
+    The structural changes now sit on Today rather than in a section of their
+    own, so the page carries other disclosures too. Counting the overflow
+    disclosures against the groups that actually overflow tests the invariant
+    the old "every expander says this" assertion was reaching for, and it now
+    fails if a group is dropped rather than merely if the page gains a control.
+    """
+    from rs_stages.movers import transitions
+    from rs_stages.ui.loaders import load_snapshot
+
+    snapshot = load_snapshot()
+    if snapshot.previous is None:
         pytest.skip("no previous snapshot published in this checkout")
-    # Any group beyond the inline cap gets an expander naming the remainder.
-    expanders = [e.label for e in at.expander]
-    for label in expanders:
-        assert "Show the remaining" in label
+    groups = transitions(snapshot.research, snapshot.previous)
+    if not groups:
+        pytest.skip("nothing changed state between the two published sessions")
+
+    import app as production
+
+    overflowing = [
+        label
+        for label, payload in groups.items()
+        if len(payload["rows"]) > production.MOVERS_INLINE
+    ]
+
+    at = _app("Today")
+    remainder = [e.label for e in at.expander if "Show the remaining" in e.label]
+    assert len(remainder) == len(overflowing)
+    for label in overflowing:
+        assert any(label in shown for shown in remainder), f"{label} has no overflow disclosure"
 
 
 def test_screener_filters_rerun_without_error():

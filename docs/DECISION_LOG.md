@@ -681,3 +681,100 @@ rather than a silent divergence.
 Tests: 367 passing, 1 new, asserting both that the literal "hours ago"
 pattern is absent and that the anchor time is read from the audit
 workflow's own cron rather than hardcoded a second time.
+
+### D-2.2.14 — The audit moves to 02:30 UTC, and starts measuring whether that helped
+
+D-2.2.12 moved the audit from the same evening to the next morning because
+the provider had not posted the day's close by 23:45 IST. It fixed the
+symptom it was aimed at — the run no longer falls back a whole session for
+the entire universe — but it did not fix the underlying condition, and
+nothing was measuring whether it had.
+
+The 29 Aug 2026 snapshot, published by a 01:00 UTC / 06:30 IST run, carried
+261 of 750 stocks on the latest session and 489 on the one before it. Two
+thirds of the universe was a session behind. That matters more than a
+staleness inconvenience: RS_Score is a cross-sectional percentile, so a
+split universe means the ranking every Stage, breakout test and Action label
+depends on is comparing two different trading sessions against each other.
+The lagging group's median 20-session traded value was ₹44.8 Cr against
+₹93.4 Cr for the current group, so the split follows liquidity — the same
+gradient the loader's own docstring predicted.
+
+The audit now fires at 02:30 UTC (08:00 IST) and the watchdog at 03:10 UTC,
+keeping the 40-minute gap the watchdog tests require. The run takes about
+three minutes and the NSE opens at 09:15 IST / 03:45 UTC, so publication
+still lands around 08:20 IST with an hour of margin: the decision remains
+pre-market for the upcoming session, which is the invariant that actually
+constrains this schedule.
+
+Ninety minutes is a guess about a third party's publishing curve, and this
+is now the second schedule move made on such a guess. So the more important
+half of this decision is that guessing stops here: `record_freshness()`
+appends every run's split to `data/freshness_history.csv` and emits a
+`::warning::` annotation when the lagging share exceeds
+`MAX_LAGGING_SHARE_PCT` (15%). A third move will be argued from the recorded
+curve.
+
+Deliberately a warning and not a failure. Refusing to publish a split
+snapshot would leave the site serving an *older* snapshot carrying the same
+split, which is strictly worse, and the split is already disclosed on every
+page. Recording is likewise non-fatal in both directions: it runs after the
+artifacts are written and before the workflow commits them, so an unreadable
+or unwritable history file prints a line and changes nothing else. A history
+whose columns are not this file's columns starts a new one rather than
+concatenating — a CSV parser returns a frame for plenty of files that are
+not this file.
+
+Tests: 387 passing, 8 new, covering the reported split, the warning
+threshold in both directions, accumulation across runs, and that neither a
+malformed nor an unwritable history can cost a run its snapshot.
+
+### D-2.2.15 — Eight peer views collapse into four, and Action moves off the right edge
+
+The site presented eight sections as equals in a pill bar: Dashboard, Setups,
+Screener, Industries, Market, Movers, Stock, Methodology. Each was coherent on
+its own. Together they asked a reader arriving before the open to know which
+of five questions they had before the site would answer any of them, which is
+why the material read as a filing cabinet rather than a decision surface.
+
+They are now four, ordered by distance from acting rather than by subject.
+**Today** absorbs Dashboard, Market and Movers — they were one question asked
+at three levels of detail. **Find** absorbs Screener, Setups and Industries —
+they were one table with different predicates and column sets, and keeping
+them apart meant a filter built in one had to be rebuilt in the next.
+**Stock** and **Method** stand.
+
+Every retired name remains a valid `?view=` value and resolves to the section
+carrying its content, with a test asserting each one lands where intended
+rather than on the home page by accident. A silent fallback would have been
+indistinguishable from a working link.
+
+The largest addition is not structural. Every count the briefing carried was
+already there; not one of them named a stock. Answering "what does the guide
+say to do today" took a second navigation and two filters. Today now opens on
+the names themselves — the entries the guide allows, the exits it requires,
+the bases it is watching — with a link into Find carrying the Action labels as
+repeated query parameters, so the link lands on the filtered list it promises.
+
+**Action moves from the last column to the second.** UI_SPEC required it last
+so the table read as evidence → decision. That reasoning holds on a wide
+screen and fails outright on a narrow one: at 390px every column past the
+third sits off the right edge behind a horizontal scroll inside a vertically
+scrolling page, with no shadow, gradient or arrow suggesting it is there. The
+one column the nine-label framework exists to produce was the column a phone
+reader never saw. The reading order is now decision → evidence, matching the
+Stock page since its own restructure; the requirement the rule protected —
+Action visibly separated from the evidence, never replacing or hiding it —
+is unchanged.
+
+Retired with it: `app_v2.py` through `app_v6.py`, five superseded prototypes
+and the source of the `var(--line)` token that `components.py` still
+referenced and no stylesheet defined, so the evidence meters had been drawing
+their filled slots with nothing behind them. The Signal Card's threshold table
+— built, tested, and rendered by nothing — is now the Stock page's
+value-against-threshold block, which is the one place the page put a value
+beside the rule it has to clear.
+
+Tests: 392 passing, 25 new, covering the legacy `?view=` aliases, the
+decision-card links arriving as an applied filter, the treemap's area
+conservation and its label contrast, and the freshness record.

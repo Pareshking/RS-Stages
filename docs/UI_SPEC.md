@@ -36,16 +36,40 @@ There is no F&O/Positioning tab: the repository has no derivatives data and `doc
 
 ## Navigation
 
-Eight views, driven by a pill navigation and addressable by query parameter (`?view=Screener&industry=Banks`, `?view=Stock&symbol=TCS`) so every row, chip and industry name is a working link into the relevant view.
+Four sections, ordered by how far the reader is from acting, driven by a pill
+navigation and addressable by query parameter (`?view=Find&mode=Stocks&industry=Banks`,
+`?view=Stock&symbol=TCS`) so every row, chip and industry name is a working link.
+A global symbol search sits beside the navigation on every section.
 
-1. **Dashboard** — the briefing: regime, stage breadth, Action distribution, leading industries, what changed since the previous completed session, and where names sit today. Briefing and Screener are separate views; the briefing belongs to the Dashboard.
-2. **Setups** — the pre-breakout view: names whose evidence says a move may be near but has not happened. Trend-template passes, relative strength leading price, contracting bases on drying volume, and Stage 1 names showing readiness. This view exists because every other view describes what a stock *is*; this one describes what it may be about to do, and that distinction must stay visible in the copy.
-3. **Screener** — the full validated universe as a dense sortable table, with Industry, Stage, RS, setup evidence and Action as the final decision column. Filters for search, Industry, Stage, Action, RS band and liquidity; paginated.
-4. **Industries** — ranked industry leadership by median RS, with participation share and median 3-month return. Industry is the NSE constituent field, never remapped.
-5. **Market** — participation: regime band, share above the 30-week and 10-week lines, 52-week-high proximity, stage posture, and the participation trend from the published breadth history.
-6. **Movers** — day-over-day structural transitions between the current and previous published snapshots, plus the largest RS rank changes. No fabricated daily-change series.
-7. **Stock** — company header, Action with its exact reason, price chart with the 10- and 30-week lines, calendar-month returns, 52-week range, trend-health checklist, extension and structural risk, and the complete evidence table.
-8. **Methodology** — formulas, source attribution, information boundary and the full nine-label Action framework.
+The eight peer views that preceded them were the same material sorted by
+*subject* rather than by *use*, which made a reader arriving at 08:55 choose
+between five questions before the site would answer any of them. The names the
+site has published — `Dashboard`, `Setups`, `Screener`, `Industries`, `Market`,
+`Movers`, `Methodology` — remain valid `?view=` values and resolve to the
+section that now carries their content, so no published link breaks.
+
+1. **Today** — the whole morning read, in the order a decision is made:
+   the split-date disclosure if any, market regime with its 5- and 20-session
+   change, the four decision counts, **the named stocks the guide is pointing
+   at**, the watchlist, stage and Action distribution, leading industries, what
+   changed since the previous close, participation with its 200-session trend,
+   and every structural change behind a disclosure. Absorbs Dashboard, Market
+   and Movers.
+2. **Find** — one table, three modes. *Stocks* is the full validated universe
+   with search, Industry, sort, canonical presets, and stage/action/RS/liquidity
+   refinements behind a single disclosure that names whatever is active inside
+   it. *Setups* is the pre-breakout view: names whose evidence says a move may
+   be near but has not happened — this mode exists because every other view
+   describes what a stock *is*, and that distinction must stay visible in the
+   copy. *Industries* is the industry map and its ranked table. Absorbs
+   Screener, Setups and Industries.
+3. **Stock** — one name in full, decision first: Action with its exact reason,
+   the value-against-threshold table, the price chart with the 10- and 30-week
+   lines, calendar-month returns, the 52-week range, each authority's own
+   itemized checklist, extension and structural risk, and the complete evidence
+   grid last. A watch control puts the name on the watchlist.
+4. **Method** — formulas, source attribution, information boundary and the full
+   nine-label Action framework.
 
 ## Action framework
 
@@ -55,7 +79,20 @@ The previous five-label UI is retired. Production uses:
 
 The detailed deterministic rules live in `docs/ACTION_SPEC.md` and `rs_stages/actions.py`.
 
-The screener's **Action column must be the final column** so the table reads as evidence → decision.
+**Action sits immediately after the symbol.** It was previously specified as the
+final column, so the table read left-to-right as evidence → decision. That
+holds on a wide screen and fails completely on a narrow one: at 390px the
+columns past the third are off the right edge behind a horizontal scroll inside
+a vertically-scrolling page, with nothing announcing they exist. The one column
+the nine-label framework exists to produce was the one a phone reader never
+saw.
+
+The reading order is therefore decision → evidence, which is also how the Stock
+page reads since its restructure — Action and the threshold table first, the
+calculation detail last. The two are now consistent, and the requirement the
+old rule was really protecting still holds: Action is visibly separated from
+the quantitative evidence by its chip, and it never replaces or hides the
+numbers beside it.
 
 ## Stock page requirements
 

@@ -39,6 +39,19 @@ BENCHMARK_KEY = "NIFTY_500"
 #: reported; an outage is not something to publish through.
 MAX_UNIVERSE_LOSS_PCT = 2.0
 
+#: Share of the universe that may still be carrying the previous session before
+#: the run says so loudly. Not a refusal: publishing a disclosed split beats
+#: publishing nothing, and the site states the split on every page. But a run
+#: where most of the field is a session old produces an RS ranking that
+#: compares two different sessions, and that should be visible in the run log
+#: rather than only to a reader who reaches the disclosure.
+MAX_LAGGING_SHARE_PCT = 15.0
+
+#: One row per run: how much of the universe carried the newest session. The
+#: schedule has now moved twice on an argument about a third party's publishing
+#: curve (D-2.2.12, D-2.2.14). This makes the next move a measurement.
+FRESHNESS_HISTORY = "freshness_history.csv"
+
 
 def build_universe_snapshots(
     symbols, histories: dict, decision: pd.Timestamp
@@ -294,6 +307,90 @@ def resolve_dates(decision_arg: str | None, start_arg: str | None, end_arg: str 
     if start >= end:
         raise ValueError("Audit start date must be before end date")
     return decision, start, end
+
+
+def record_freshness(result: pd.DataFrame, output_dir: Path) -> float:
+    """Report and record how much of the universe carried the newest session.
+
+    The split is not an error and never blocks publication: every field for a
+    lagging stock is computed from that stock's own latest completed session,
+    and the site discloses the split on every page. What it does do is put two
+    sessions inside one cross-sectional RS ranking, so a run where most of the
+    field is a session old is worth seeing in the log rather than only in the
+    disclosure — and worth keeping, so that the next argument about when to run
+    is settled by the recorded curve rather than by another estimate.
+
+    Returns the lagging share as a percentage.
+    """
+    dates = pd.to_datetime(result["Date"], errors="coerce").dt.normalize()
+    counts = dates.value_counts().sort_index(ascending=False)
+    total = int(len(dates.dropna()))
+    if not total:
+        return 0.0
+    newest = dates.max()
+    current = int((dates == newest).sum())
+    lagging = total - current
+    share = lagging / total * 100.0
+
+    if len(counts) > 1:
+        breakdown = ", ".join(f"{d.date()}={n}" for d, n in counts.items())
+        print(f"Date split across the universe (provider lag, not an error): {breakdown}")
+        print(f"Lagging share: {share:.1f}% ({lagging} of {total})")
+        if share > MAX_LAGGING_SHARE_PCT:
+            # A warning annotation, not a failure. Refusing to publish here
+            # would leave the site on an older snapshot still carrying the same
+            # split, which is strictly worse than publishing a disclosed one.
+            print(
+                f"::warning title=Most of the universe is a session behind::"
+                f"{lagging} of {total} stocks ({share:.1f}%) still carry the session before "
+                f"{newest.date()}, above the {MAX_LAGGING_SHARE_PCT:.0f}% threshold. The RS "
+                "ranking therefore compares two sessions. Consider moving the schedule later; "
+                "freshness_history.csv carries the record."
+            )
+    else:
+        print(f"Whole universe on {newest.date()}: {current} stocks, no provider lag")
+
+    # Appended, not rewritten: the question this answers is a trend.
+    path = output_dir / FRESHNESS_HISTORY
+    row = pd.DataFrame(
+        [
+            {
+                "Run_UTC": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "Decision_Date": newest.strftime("%Y-%m-%d"),
+                "Symbols": total,
+                "Current": current,
+                "Lagging": lagging,
+                "Lagging_Pct": round(share, 2),
+            }
+        ]
+    )
+    # The whole record is bookkeeping beside the deliverable. It runs after the
+    # artifacts are written and before the workflow commits them, so an
+    # exception here would fail a run whose snapshot was already correct — the
+    # split it exists to describe is reported above regardless.
+    try:
+        if path.exists():
+            # A history that cannot be read, or that is not this file's shape,
+            # starts a new one rather than corrupting the record. Checking the
+            # columns as well as the read matters because a CSV parser will
+            # happily return a frame for a file that is not this file at all.
+            try:
+                existing = pd.read_csv(path)
+                if set(row.columns).issubset(existing.columns):
+                    row = pd.concat([existing[row.columns], row], ignore_index=True)
+                else:
+                    print(
+                        f"{FRESHNESS_HISTORY} does not carry the expected columns; "
+                        "starting a new one"
+                    )
+            except (OSError, ValueError) as exc:
+                print(
+                    f"Could not read {FRESHNESS_HISTORY} ({type(exc).__name__}); starting a new one"
+                )
+        row.tail(500).to_csv(path, index=False)
+    except (OSError, ValueError) as exc:
+        print(f"Could not write {FRESHNESS_HISTORY} ({type(exc).__name__}); the run is unaffected")
+    return share
 
 
 def main() -> None:
@@ -608,10 +705,7 @@ def main() -> None:
     print(f"Yahoo history: {start.date()} to {end.date()} exclusive")
     print(f"Universe rows after DUMMY exclusion: {len(universe)}")
     print(f"Research rows: {len(result)}")
-    date_counts = pd.to_datetime(result["Date"], errors="coerce").dt.normalize().value_counts()
-    if len(date_counts) > 1:
-        breakdown = ", ".join(f"{d.date()}={n}" for d, n in date_counts.sort_index(ascending=False).items())
-        print(f"Date split across the universe (provider lag, not an error): {breakdown}")
+    record_freshness(result, output_dir)
     print(f"Independent checks: stage={checked_stage}, high52={checked_high}, volume={checked_volume}, ud={checked_ud}, liquidity={checked_liquidity}")
     print(f"Independent checks (v2.1): ma10w={checked_ma_10w}, low52={checked_low}, trend_panel={checked_trend}")
     print(

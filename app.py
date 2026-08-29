@@ -54,7 +54,30 @@ st.set_page_config(
 )
 st.markdown(theme.stylesheet(), unsafe_allow_html=True)
 
-VIEWS = ["Dashboard", "Setups", "Screener", "Industries", "Market", "Movers", "Stock", "Methodology"]
+#: Four sections, ordered by how far the reader is from acting. The eight that
+#: preceded them were peers in a pill bar, which asked a reader arriving at
+#: 08:55 to know which of five questions they had before the site would help:
+#: Today answers "what does the guide say now", Find is the one table for
+#: every search, Stock is one name in full, Method is the reference.
+VIEWS = ["Today", "Find", "Stock", "Method"]
+HOME = "Today"
+
+#: Every section this site has ever had, mapped to where its content now lives,
+#: so a bookmark or a shared link from before the merge still lands somewhere
+#: sensible instead of silently falling back to the home page.
+LEGACY_VIEWS = {
+    "Dashboard": "Today",
+    "Market": "Today",
+    "Movers": "Today",
+    "Screener": "Find",
+    "Setups": "Find",
+    "Industries": "Find",
+    "Methodology": "Method",
+}
+
+#: Which mode of Find a legacy link should open in.
+LEGACY_FIND_MODE = {"Setups": "Setups", "Industries": "Industries", "Screener": "Stocks"}
+
 STAGE_ORDER = ["Stage 2", "Stage 3", "Stage 4", "Stage 1"]
 ACTION_ORDER = ["BUY★", "BUY", "HOLD", "WAIT", "WATCH★", "WATCH", "REDUCE", "SELL", "AVOID"]
 PAGE_SIZE = 50
@@ -114,9 +137,21 @@ def _initial(param: str, allowed: list[str] | None, fallback: str) -> str:
     return fallback
 
 
+def _requested_view() -> str:
+    """The section to open, accepting the names the site used before the merge."""
+    value = st.query_params.get("view")
+    if value in VIEWS:
+        return value
+    return LEGACY_VIEWS.get(value, HOME)
+
+
 def _top_symbol() -> str:
     ordered = DATA.sort_values("RS_Score", ascending=False)["Symbol"].dropna().astype(str)
     return ordered.iloc[0] if len(ordered) else ""
+
+
+#: Every symbol in the snapshot, alphabetically, for the global search.
+ALL_SYMBOLS = sorted(DATA["Symbol"].dropna().astype(str).unique().tolist())
 
 
 if "symbol" not in st.session_state:
@@ -127,6 +162,17 @@ _INDUSTRIES = sorted(DATA["Industry"].dropna().astype(str).unique().tolist())
 _REQUESTED_INDUSTRY = _initial("industry", _INDUSTRIES, "")
 if "screener_industry" not in st.session_state:
     st.session_state["screener_industry"] = _REQUESTED_INDUSTRY or "All"
+
+# Today's decision cards link into Find pre-filtered to the Action they name;
+# without this the link arrived at an unfiltered table, which is worse than no
+# link at all — the reader clicked "all 310 SELLs" and got 750 stocks.
+_REQUESTED_ACTIONS = [
+    label
+    for label in (st.query_params.get_all("action") if hasattr(st.query_params, "get_all") else [])
+    if label in ACTION_ORDER
+]
+if _REQUESTED_ACTIONS and "screener_action" not in st.session_state:
+    st.session_state["screener_action"] = _REQUESTED_ACTIONS
 if "industry_pick" not in st.session_state:
     st.session_state["industry_pick"] = _REQUESTED_INDUSTRY or "None"
 
@@ -154,9 +200,9 @@ else:
         f'({len(SNAP.universe):,})</span>'
     )
 write(
-    '<div class="ws-header"><div class="ws-header-inner">'
-    '<a class="ws-brand" target="_self" href="?view=Dashboard">'
-    '<span class="ws-mark">RS</span><span><div class="ws-wordmark">RS-Stages</div>'
+    '<div class="ws-header" role="banner"><div class="ws-header-inner">'
+    f'<a class="ws-brand" target="_self" href="{ui.query_href(view=HOME)}">'
+    '<span class="ws-mark" aria-hidden="true">RS</span><span><div class="ws-wordmark">RS-Stages</div>'
     '<div class="ws-tagline">Relative strength · stages · guide actions</div></span></a>'
     f'<div class="ws-stamp">{ui.dot(POSITIVE)}Validated snapshot '
     f'<span class="num" style="color:var(--ink)">{fmt_date(decision)}</span>'
@@ -164,14 +210,41 @@ write(
 )
 
 st.write("")
-selected = st.segmented_control(
-    "Section",
-    VIEWS,
-    default=_initial("view", VIEWS, "Dashboard"),
-    key="nav",
-    label_visibility="collapsed",
-)
-VIEW = selected or _initial("view", VIEWS, "Dashboard")
+
+# Nav and a global symbol search share one row. The search is the piece the
+# site had no equivalent of: before it, a stock was reachable only from the
+# Stock page's own dropdown, so every lookup began with two navigations.
+nav_row = st.columns([3, 2], gap="medium", vertical_alignment="center")
+with nav_row[0]:
+    selected = st.segmented_control(
+        "Section",
+        VIEWS,
+        default=_requested_view(),
+        key="nav",
+        label_visibility="collapsed",
+    )
+with nav_row[1]:
+    jump = st.selectbox(
+        "Go to a stock",
+        [""] + ALL_SYMBOLS,
+        index=0,
+        key="global_search",
+        label_visibility="collapsed",
+        placeholder="Search any of "
+        f"{len(ALL_SYMBOLS):,} stocks…",
+    )
+VIEW = selected or _requested_view()
+
+# Choosing from the search is a navigation, not a filter: it sets the symbol
+# and opens the Stock page, then clears itself so the box does not sit there
+# claiming to still be showing that stock once the reader moves on.
+if jump:
+    st.session_state["symbol"] = jump
+    st.session_state["global_search"] = ""
+    st.query_params["view"] = "Stock"
+    st.query_params["symbol"] = jump
+    VIEW = "Stock"
+    st.rerun()
 
 
 def heading(title: str, subtitle: str) -> None:
@@ -196,14 +269,41 @@ def missing(key: str) -> bool:
 
 
 # --- shared fragments -------------------------------------------------------
+def breadth_deltas() -> str:
+    """Where participation stands against 5 and 20 sessions ago.
+
+    A band on one number says nothing about direction: 64% rising from 58% and
+    64% falling from 71% are opposite markets wearing the same label, and the
+    published history already carries 200 sessions of the answer.
+    """
+    history = SNAP.breadth
+    if history is None or history.empty or "Pct_Above_MA_30W" not in history.columns:
+        return ""
+    series = pd.to_numeric(history["Pct_Above_MA_30W"], errors="coerce").dropna()
+    if len(series) < 2:
+        return ""
+    latest = float(series.iloc[-1])
+    parts = []
+    for sessions, label in ((5, "5 sessions"), (20, "20 sessions")):
+        if len(series) <= sessions:
+            continue
+        change = latest - float(series.iloc[-1 - sessions])
+        parts.append(
+            f'<span class="item">{label} '
+            f'<b class="num" style="color:{theme.signed_color(change)}">{change:+.1f} pts</b></span>'
+        )
+    if not parts:
+        return ""
+    return (
+        f'<span class="ws-legend" style="font-size:12.5px">{"".join(parts)}</span>'
+    )
+
+
 def regime_card(link: bool = True) -> str:
     color = {"Broad": POSITIVE, "Mixed": CAUTION, "Narrow": NEGATIVE}.get(BREADTH["regime"], "#68717F")
-    link_html = (
-        '<a target="_self" href="?view=Market" style="margin-left:auto;font-size:12.5px;'
-        'color:var(--ink);font-weight:600;text-decoration:none;'
-        'border-bottom:1.5px solid var(--rule-strong)">Market detail →</a>'
-        if link
-        else ""
+    deltas = breadth_deltas()
+    trail = (
+        f'<span style="margin-left:auto">{deltas}</span>' if deltas else ""
     )
     return ui.card(
         '<div class="ws-eyebrow">Market regime</div>'
@@ -211,11 +311,13 @@ def regime_card(link: bool = True) -> str:
         f'<span style="font-size:19px;font-weight:800;color:{color}">{ui.esc(BREADTH["regime"])}</span>'
         f'<span class="num" style="font-size:13px;color:var(--sub)">'
         f'<b style="color:var(--ink)">{fmt_pct(BREADTH["pct_above_ma_30w"], 0, signed=False)}</b>'
-        " of the universe above its 30-week line</span>"
-        f"{link_html}</div>"
+        " of classified stocks above their 30-week line</span>"
+        f"{trail}</div>"
         f'<div style="font-size:12.5px;color:var(--sub);margin-top:8px;line-height:1.5">'
         f'{ui.esc(BREADTH["regime_description"])} Breadth is a description of participation '
-        "in completed sessions. It is not a call on direction.</div>",
+        "in completed sessions. It is not a call on direction; the change beside it is measured "
+        "from the published breadth history, whose own last session can be one behind these "
+        "counts.</div>",
         extra_class="lift",
     )
 
@@ -270,12 +372,223 @@ def group_shelf_card(title: str, description: str, rows: pd.DataFrame, meta: str
 
 
 # --- Dashboard --------------------------------------------------------------
-def page_dashboard() -> None:
+#: The watchlist lives in the URL. The site is public with no login and holds
+#: no per-visitor state on the server, so a list carried in the address is the
+#: one form that survives a reload, a bookmark and being sent to someone else —
+#: and it is honest about where it lives rather than pretending at an account.
+WATCHLIST_PARAM = "watch"
+WATCHLIST_LIMIT = 60
+
+
+def watchlist() -> list[str]:
+    """Symbols on the watchlist, in the order they were starred."""
+    raw = st.session_state.get("watchlist")
+    if raw is None:
+        raw = st.query_params.get(WATCHLIST_PARAM) or ""
+        known = set(DATA["Symbol"].astype(str))
+        raw = [s for s in (part.strip().upper() for part in raw.split(",")) if s in known]
+        st.session_state["watchlist"] = raw
+    return list(raw)
+
+
+def set_watchlist(symbols: list[str]) -> None:
+    """Persist the watchlist to session state and to the address bar."""
+    trimmed = symbols[:WATCHLIST_LIMIT]
+    st.session_state["watchlist"] = trimmed
+    if trimmed:
+        st.query_params[WATCHLIST_PARAM] = ",".join(trimmed)
+    elif WATCHLIST_PARAM in st.query_params:
+        del st.query_params[WATCHLIST_PARAM]
+
+
+def watchlist_strip() -> None:
+    """The starred names, with today's Action beside each."""
+    names = watchlist()
+    if not names:
+        return
+    rows = DATA[DATA["Symbol"].astype(str).isin(names)]
+    order = {symbol: position for position, symbol in enumerate(names)}
+    rows = rows.assign(_o=rows["Symbol"].astype(str).map(order)).sort_values("_o")
+    pills = "".join(
+        f'<a class="ws-pill-link pop" target="_self" href="{ui.stock_href(r["Symbol"])}" '
+        f'style="border-color:{theme.action_style(r["Action"])[0]}33">'
+        f'<span class="sym">{ui.esc(r["Symbol"])}</span>'
+        f'<span class="meta" style="color:{theme.action_style(r["Action"])[0]};font-weight:700">'
+        f'{ui.esc(r["Action"])}</span></a>'
+        for _, r in rows.iterrows()
+    )
+    write(
+        ui.card(
+            '<div style="display:flex;align-items:center;justify-content:space-between;'
+            'gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+            '<div class="ws-eyebrow" style="margin:0">Your watchlist</div>'
+            f'<span class="num" style="font-size:12.5px;color:var(--faint)">{len(rows):,}</span>'
+            "</div>"
+            f'<div class="ws-chips">{pills}</div>'
+            '<div class="ws-note" style="margin-top:10px">This list is carried in the page address, '
+            "not on a server. Bookmark this page to keep it, or send the link to share it.</div>",
+            extra_class="lift",
+        )
+    )
+
+
+#: Actions the guide treats as an instruction to open or close a position, in
+#: the order a reader wants them: what to buy, then what to sell.
+DECISION_GROUPS = (
+    ("Buy", ("BUY★", "BUY"), POSITIVE,
+     "Stage 2, RS 80 or better, no timing warning. A star means volume has confirmed the breakout."),
+    ("Reduce or sell", ("SELL", "REDUCE"), NEGATIVE,
+     "Stage 4, or Stage 3, or Stage 2 with volume confirming distribution."),
+    ("Watch", ("WATCH★", "WATCH"), CAUTION,
+     "Stage 1 basing. Not an entry — the guide is waiting for the breakout."),
+)
+
+#: Names shown inline per decision group before the rest goes behind a link.
+DECISION_INLINE = 18
+
+
+def decision_board() -> None:
+    """The stocks the guide is actually pointing at, named, above the fold.
+
+    Every count on this page was already available; not one of them told the
+    reader *which stock*. Answering "what does the guide say to do today" took
+    a second navigation into the Screener and two filters, which is the whole
+    reason the site did not feel like a decision surface.
+    """
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">The names</div>')
+    ordered = DATA.sort_values("RS_Score", ascending=False)
+    cards = []
+    for title, labels, color, note in DECISION_GROUPS:
+        rows = ordered[ordered["Action"].isin(labels)]
+        if rows.empty:
+            body = (
+                f'<div class="ws-note">No stock carries this label in the '
+                f"{fmt_date(SNAP.decision_date)} snapshot. That is a reading of the market, "
+                "not a missing calculation.</div>"
+            )
+        else:
+            shown = rows.head(DECISION_INLINE)
+            body = ui.pill_row(
+                (r["Symbol"], f"RS {fmt_rs(r.get('RS_Score'))}") for _, r in shown.iterrows()
+            )
+            if len(rows) > len(shown):
+                href = ui.query_href_multi(
+                    {"view": "Find", "mode": "Stocks"}, action=list(labels)
+                )
+                body += (
+                    f'<div class="ws-note" style="margin-top:9px">'
+                    f'<a target="_self" href="{href}" style="color:var(--ink);font-weight:600">'
+                    f"All {len(rows):,} in Find →</a></div>"
+                )
+        cards.append(
+            ui.card(
+                '<div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;'
+                'margin-bottom:4px">'
+                f'{ui.dot(color, 9)}'
+                f'<span style="font-size:14.5px;font-weight:700;color:{color}">{ui.esc(title)}</span>'
+                f'<span class="num" style="font-size:12.5px;color:var(--faint)">{len(rows):,}</span>'
+                "</div>"
+                f'<div class="ws-note" style="margin-bottom:11px">{ui.esc(note)}</div>{body}',
+                extra_class="lift",
+            )
+        )
+    write("".join(cards))
+
+
+def participation_section() -> None:
+    """Breadth: the counts, the posture, and the 200-session trend.
+
+    Was its own section. It is context for the decisions above rather than a
+    destination of its own, so it sits beneath them on the same page.
+    """
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Participation</div>')
+    cards = [
+        ui.stat_card(
+            "Above the 30-week line",
+            fmt_pct(BREADTH["pct_above_ma_30w"], 0, signed=False).rstrip("%"),
+            suffix="%",
+            note=f"{BREADTH['above_ma_30w']:,} of {BREADTH['classified']:,} classified",
+            color=POSITIVE if BREADTH["pct_above_ma_30w"] >= 60 else "var(--ink)",
+        )
+    ]
+    if BREADTH["has_ma_10w"]:
+        cards.append(
+            ui.stat_card(
+                "Above the 10-week line",
+                fmt_pct(BREADTH["pct_above_ma_10w"], 0, signed=False).rstrip("%"),
+                suffix="%",
+                note=f"{BREADTH['above_ma_10w']:,} of {BREADTH['classified']:,} classified",
+            )
+        )
+    cards.append(
+        ui.stat_card(
+            "Within 3% of the 52-week high",
+            f"{BREADTH['near_52w_high']:,}",
+            note=f"{BREADTH['near_52w_high'] / max(BREADTH['classified'], 1) * 100:.0f}% of "
+                 "classified stocks",
+            color=POSITIVE,
+        )
+    )
+    leaders = int(BREADTH.get("rs_leaders", 0))
+    lagging = int(BREADTH.get("rs_lagging", 0))
+    scored = int(BREADTH.get("valid_rs", 0))
+    middle = max(0, scored - leaders - lagging)
+    cards.append(
+        ui.stat_card(
+            "RS leadership",
+            f"{leaders:,}",
+            suffix=f" of {scored:,}",
+            # Leaders and laggards alone left the 50-79 band and the unscored
+            # stocks out of a card that read as a two-way split of the universe.
+            note=f"{middle:,} adequate (50-79), {lagging:,} lagging, "
+                 f"{len(DATA) - scored:,} unscored",
+        )
+    )
+    write(ui.stat_row(cards))
+    st.write("")
+    breadth_trend()
+
+
+def movers_section() -> None:
+    """Every structural change between the two completed sessions.
+
+    Behind a disclosure: the summary shelves above already name the stocks a
+    reader is likely to act on, and this is the exhaustive form — up to a
+    hundred rows a group.
+    """
+    if SNAP.previous is None:
+        return
+    groups = transitions(DATA, SNAP.previous)
+    if not groups:
+        return
+    moved = set()
+    for payload in groups.values():
+        moved.update(payload["rows"]["Symbol"].astype(str))
+    events = sum(len(payload["rows"]) for payload in groups.values())
+    with st.expander(
+        f"All structural changes — {len(moved):,} stocks, {events:,} group entries", expanded=False
+    ):
+        st.caption(
+            "A stock can appear in more than one group: entering Stage 2 usually changes its "
+            "Action as well. The counts therefore overlap and do not sum to the stocks that "
+            f"moved. Compared against {fmt_date(SNAP.previous_date)}."
+        )
+        _movers_groups(groups)
+        _rs_movers_card()
+
+
+def page_today() -> None:
+    """The whole morning read: regime, the named decisions, and what moved.
+
+    Absorbs what used to be three peer sections — Dashboard, Market and Movers.
+    They were the same question asked at three levels of detail, and splitting
+    them across a pill bar meant a reader had to already know which level they
+    wanted before the site would show them anything.
+    """
     heading(
-        "Today’s briefing",
-        "A top-down read of the validated snapshot — regime, industry leadership, what changed "
-        "since the previous completed session, and where names sit today. This page orients; "
-        "the Screener selects.",
+        "Today",
+        "What the guide says as of the latest completed session — the market it says it in, "
+        "the names it names, and what changed since the previous close.",
     )
 
     coverage = SNAP.date_coverage
@@ -363,6 +676,12 @@ def page_dashboard() -> None:
     )
 
     st.write("")
+    decision_board()
+
+    st.write("")
+    watchlist_strip()
+
+    st.write("")
     unscored = len(DATA) - int(BREADTH.get("valid_rs", 0))
     coverage_note = (
         f'<div class="ws-note" style="margin-top:10px">'
@@ -386,7 +705,7 @@ def page_dashboard() -> None:
         top = industries.head(6)
         chips = "".join(
             f'<a class="ws-pill-link pop" target="_self" '
-            f'href="{ui.query_href(view="Industries", industry=row["Industry"])}">'
+            f'href="{ui.query_href(view="Find", mode="Industries", industry=row["Industry"])}">'
             f'<span class="sym">{ui.esc(row["Industry"])}</span>'
             f'<span class="meta num">RS {fmt_rs(row["Median_RS"])}</span></a>'
             for _, row in top.iterrows()
@@ -397,7 +716,7 @@ def page_dashboard() -> None:
                 '<div style="display:flex;align-items:center;justify-content:space-between;'
                 'margin-bottom:10px;gap:8px;flex-wrap:wrap">'
                 '<div class="ws-eyebrow" style="margin:0">Leading industries</div>'
-                '<a target="_self" href="?view=Industries" style="font-size:12.5px;color:var(--ink);'
+                '<a target="_self" href="?view=Find&mode=Industries" style="font-size:12.5px;color:var(--ink);'
                 'font-weight:600;text-decoration:none;border-bottom:1.5px solid var(--rule-strong)">'
                 "All industries →</a></div>"
                 f'<div class="ws-chips">{chips}</div>'
@@ -438,16 +757,16 @@ def page_dashboard() -> None:
                         len(rows),
                         color,
                         [(r["Symbol"], f"RS {fmt_rs(r.get('RS_Score'))}") for _, r in rows.iterrows()],
-                        more_href="?view=Movers",
+                        more_href="",
                     )
                 )
             write(
                 ui.card(
                     "".join(shelves)
                     + '<div class="ws-note" style="margin-top:10px">Each group is a set difference '
-                    "between two completed-session snapshots produced by the same pipeline. "
-                    '<a target="_self" href="?view=Movers" style="color:var(--ink);font-weight:600">'
-                    "All movers →</a></div>"
+                    "between two completed-session snapshots produced by the same pipeline. A stock "
+                    "can appear in more than one group. Every member of every group is listed under "
+                    "<b style=\'color:var(--ink)\'>All structural changes</b> below.</div>"
                 )
             )
 
@@ -495,6 +814,12 @@ def page_dashboard() -> None:
                 ],
             )
         )
+
+    st.write("")
+    participation_section()
+
+    st.write("")
+    movers_section()
 
     st.write("")
     _manual_trigger_control()
@@ -810,6 +1135,13 @@ def page_industries() -> None:
     column, ascending = INDUSTRY_SORTS[sort_label]
     if column in industries.columns:
         industries = industries.sort_values(column, ascending=ascending, na_position="last")
+
+    # The map answers "where is the weight", which a ranked list cannot: it is
+    # what makes a one-stock industry visibly a one-stock industry. The table
+    # beneath is the same data in full, and is the accessible fallback for the
+    # map's colour encoding.
+    write(ui.industry_map(industries, min_stocks=MIN_INDUSTRY_STOCKS))
+    st.write("")
     write(ui.industry_table(industries.reset_index(drop=True), min_stocks=MIN_INDUSTRY_STOCKS))
 
     # Drill-down: the constituents of one industry, without leaving the page.
@@ -842,138 +1174,88 @@ def page_industries() -> None:
 
 
 # --- Market -----------------------------------------------------------------
-def page_market() -> None:
-    heading(
-        "Market regime",
-        "How broad is participation across the Nifty Total Market universe? Every measure below is "
-        "a count of the same locked per-stock fields the Screener shows.",
-    )
-    write(regime_card(link=False))
-    st.write("")
+def breadth_trend() -> None:
+    """The participation trend, with the benchmark index beside it.
 
-    cards = [
-        ui.stat_card(
-            "Above the 30-week line",
-            fmt_pct(BREADTH["pct_above_ma_30w"], 0, signed=False).rstrip("%"),
-            suffix="%",
-            note=f"{BREADTH['above_ma_30w']:,} of {BREADTH['classified']:,} classified",
-            color=POSITIVE if BREADTH["pct_above_ma_30w"] >= 60 else "var(--ink)",
-        )
-    ]
-    if BREADTH["has_ma_10w"]:
-        cards.append(
-            ui.stat_card(
-                "Above the 10-week line",
-                fmt_pct(BREADTH["pct_above_ma_10w"], 0, signed=False).rstrip("%"),
-                suffix="%",
-                note=f"{BREADTH['above_ma_10w']:,} of {BREADTH['classified']:,} classified",
-            )
-        )
-    cards.append(
-        ui.stat_card(
-            "Within 3% of the 52-week high",
-            f"{BREADTH['near_52w_high']:,}",
-            note=f"{BREADTH['near_52w_high'] / max(BREADTH['classified'], 1) * 100:.0f}% of "
-                 "classified stocks",
-            color=POSITIVE,
-        )
-    )
-    leaders = int(BREADTH.get("rs_leaders", 0))
-    lagging = int(BREADTH.get("rs_lagging", 0))
-    scored = int(BREADTH.get("valid_rs", 0))
-    middle = max(0, scored - leaders - lagging)
-    cards.append(
-        ui.stat_card(
-            "RS leadership",
-            f"{leaders:,}",
-            suffix=f" of {scored:,}",
-            # Leaders and laggards alone left the 50-79 band and the unscored
-            # stocks out of a card that read as a two-way split of the universe.
-            note=f"{middle:,} adequate (50-79), {lagging:,} lagging, "
-                 f"{len(DATA) - scored:,} unscored",
-        )
-    )
-    write(ui.stat_row(cards))
-
-    st.write("")
+    Formerly the body of a separate Market section. The stat cards that opened
+    that section now sit in participation_section(), because a count and its
+    200-session history are one reading, not two destinations.
+    """
     write(ui.card(ui.posture_bar(BREADTH["stages"], "Stage posture across the universe")))
-
     st.write("")
     if SNAP.breadth is None or SNAP.breadth.empty:
         missing("breadth")
-    else:
-        history = SNAP.breadth
+        return
 
-        def series(column):
-            return [
-                {"time": pd.Timestamp(r["Date"]).strftime("%Y-%m-%d"), "value": float(r[column])}
-                for _, r in history.iterrows()
-                if column in history.columns and pd.notna(r.get(column))
-            ]
+    history = SNAP.breadth
 
-        benchmark = series("Benchmark_Close")
-        ticker = (
-            str(history["Benchmark_Ticker"].dropna().iloc[-1])
-            if "Benchmark_Ticker" in history.columns and history["Benchmark_Ticker"].notna().any()
-            else ""
+    def series(column):
+        return [
+            {"time": pd.Timestamp(r["Date"]).strftime("%Y-%m-%d"), "value": float(r[column])}
+            for _, r in history.iterrows()
+            if column in history.columns and pd.notna(r.get(column))
+        ]
+
+    benchmark = series("Benchmark_Close")
+    legend = (
+        '<span class="item"><span style="width:14px;height:2.5px;background:#2465DE"></span>'
+        "Above 30-week</span>"
+        '<span class="item"><span style="width:14px;height:2.5px;background:#9DBDF0"></span>'
+        "Above 10-week</span>"
+    )
+    if benchmark:
+        # The provider's symbol for the index is an implementation detail; the
+        # index has a name, and that is what a reader needs. The ticker stays
+        # in the published artifact and on Method.
+        legend += (
+            '<span class="item"><span style="width:14px;height:0;border-top:2px dashed '
+            '#1a1d21"></span>Nifty 500 index</span>'
         )
-        legend = (
-            '<span class="item"><span style="width:14px;height:2.5px;background:#2465DE"></span>'
-            "Above 30-week</span>"
-            '<span class="item"><span style="width:14px;height:2.5px;background:#9DBDF0"></span>'
-            "Above 10-week</span>"
+    # The counts above come from the snapshot, whose newest information date is
+    # SNAP.decision_date. The series below comes from breadth_history, which
+    # drops a session the panel covers for less than half the universe — so its
+    # last point is routinely one session older. Two stacked readings of the
+    # same measure must not silently sit on different dates.
+    history_end = pd.to_datetime(history["Date"], errors="coerce").max()
+    detail = (
+        f"{len(history)} completed sessions, each counted as of that session. The series is a "
+        "stack of point-in-time counts, not one snapshot projected backwards."
+    )
+    if pd.notna(history_end) and decision is not None and (
+        pd.Timestamp(history_end).normalize() != pd.Timestamp(decision).normalize()
+    ):
+        detail += (
+            f" This series ends at {fmt_date(history_end)}, one session behind the "
+            f"{fmt_date(decision)} counts above it: a session is charted only once the provider "
+            "has published it for at least half the universe, and the newest session has not "
+            "reached that yet. The last point and the cards above are therefore different "
+            "sessions, not a disagreement."
         )
-        if benchmark:
-            legend += (
-                '<span class="item"><span style="width:14px;height:0;border-top:2px dashed '
-                f'#1a1d21"></span>Nifty 500{" · " + ui.esc(ticker) if ticker else ""}</span>'
-            )
-        # The counts above come from the snapshot, whose newest information date
-        # is SNAP.decision_date. The series below comes from breadth_history,
-        # which drops a session the panel covers for less than half the
-        # universe — so its last point is routinely one session older. Two
-        # stacked readings of the same measure must not silently sit on
-        # different dates.
-        history_end = pd.to_datetime(history["Date"], errors="coerce").max()
-        detail = (
-            f"{len(history)} completed sessions, each counted as of that session. The series is a "
-            "stack of point-in-time counts, not one snapshot projected backwards."
+    if benchmark:
+        detail += (
+            " Breadth is a percentage on the left axis; the index is a price level on the right. "
+            "The index tracks 500 companies while breadth tracks the whole Nifty Total Market "
+            "universe, so a divergence can be composition rather than market behaviour."
         )
-        if pd.notna(history_end) and decision is not None and (
-            pd.Timestamp(history_end).normalize() != pd.Timestamp(decision).normalize()
-        ):
-            detail += (
-                f" This series ends at {fmt_date(history_end)}, one session behind the "
-                f"{fmt_date(decision)} counts above it: a session is charted only once the "
-                "provider has published it for at least half the universe, and the newest "
-                "session has not reached that yet. The last point and the cards above are "
-                "therefore different sessions, not a disagreement."
-            )
-        if benchmark:
-            detail += (
-                " Breadth is a percentage on the left axis; the index is a price level on the "
-                "right. The index tracks 500 companies while breadth tracks the whole Nifty Total "
-                "Market universe, so a divergence can be composition rather than market behaviour."
-            )
+    write(
+        ui.card(
+            '<div style="display:flex;align-items:center;justify-content:space-between;'
+            'flex-wrap:wrap;gap:8px;margin-bottom:6px">'
+            '<span style="font-size:13px;font-weight:700">Participation trend</span>'
+            f'<span class="ws-legend">{legend}</span></div>'
+            f'<div class="ws-note">{detail}</div>'
+        )
+    )
+    _line_chart(series("Pct_Above_MA_30W"), series("Pct_Above_MA_10W"), benchmark)
+    if not benchmark:
+        st.write("")
         write(
-            ui.card(
-                '<div style="display:flex;align-items:center;justify-content:space-between;'
-                'flex-wrap:wrap;gap:8px;margin-bottom:6px">'
-                '<span style="font-size:13px;font-weight:700">Participation trend</span>'
-                f'<span class="ws-legend">{legend}</span></div>'
-                f'<div class="ws-note">{detail}</div>'
+            ui.missing_notice(
+                "No benchmark index in this snapshot",
+                "The breadth history carries no index column, so only participation is drawn. "
+                "Re-run the Real Data Research Audit to publish it alongside breadth.",
             )
         )
-        _line_chart(series("Pct_Above_MA_30W"), series("Pct_Above_MA_10W"), benchmark)
-        if not benchmark:
-            st.write("")
-            write(
-                ui.missing_notice(
-                    "No benchmark index in this snapshot",
-                    "The breadth history carries no index column, so only participation is drawn. "
-                    "Re-run the Real Data Research Audit to publish it alongside breadth.",
-                )
-            )
 
 
 def _line_chart(
@@ -1006,50 +1288,8 @@ def _line_chart(
 
 
 # --- Movers -----------------------------------------------------------------
-def page_movers() -> None:
-    previous_date = SNAP.previous_date
-    heading(
-        "What changed",
-        f"Structural changes between {ui.esc(fmt_date(previous_date))} and "
-        f"{ui.esc(fmt_date(SNAP.decision_date))}. Every group is a set difference between two "
-        "completed-session snapshots run through the identical pipeline."
-        if previous_date is not None
-        else "Structural changes between the two most recent completed sessions.",
-    )
-    if missing("previous"):
-        return
-
-    groups = transitions(DATA, SNAP.previous)
-    if not groups:
-        write(ui.card('<div class="ws-note">Nothing changed state between the two sessions.</div>'))
-        return
-
-    # Group labels carry our locked Stage vocabulary; they are not lower-cased,
-    # because "stage 2 — advancing" is not the name of anything in this system.
-    parts = [
-        f'<b class="num">{len(payload["rows"])}</b> {ui.esc(label)}'
-        for label, payload in groups.items()
-    ]
-    # The groups are not a partition and the counts must not read as one: a
-    # stock that entered Stage 2 almost always changed Action too, so summing
-    # the counts double-counts it. State the distinct stocks that moved at all.
-    moved = set()
-    for payload in groups.values():
-        moved.update(payload["rows"]["Symbol"].astype(str))
-    events = sum(len(payload["rows"]) for payload in groups.values())
-    write(
-        ui.card(
-            f'<span class="num">{len(moved):,}</span> of <span class="num">{len(DATA):,}</span> '
-            f'stocks changed state, across <span class="num">{events:,}</span> group entries: '
-            + " · ".join(parts)
-            + '.<div class="ws-note" style="margin-top:8px">A stock can appear in more than one '
-            "group — entering Stage 2 usually changes its Action as well — so the counts overlap "
-            "and do not sum to the stocks that moved.</div>",
-            extra_class="lift",
-            style="font-size:13.5px",
-        )
-    )
-
+def _movers_groups(groups: dict) -> None:
+    """One card per structural change group, every member reachable."""
     for label, payload in groups.items():
         rows = payload["rows"]
         kind = "stage" if "Stage_To" in rows.columns else ("action" if "Action_To" in rows.columns else "flag")
@@ -1062,7 +1302,7 @@ def page_movers() -> None:
         )
         st.write("")
         # Every member is reachable. The first page is inline; the remainder
-        # goes behind an expander so a group of a hundred names does not bury
+        # goes behind a disclosure so a group of a hundred names does not bury
         # the groups beneath it.
         head, tail = rows.head(MOVERS_INLINE), rows.iloc[MOVERS_INLINE:]
         write(
@@ -1077,30 +1317,34 @@ def page_movers() -> None:
             )
         )
         if not tail.empty:
-            with st.expander(f"Show the remaining {len(tail):,} in “{label}”"):
+            with st.expander(f"Show the remaining {len(tail):,} in \u201c{label}\u201d"):
                 write(ui.card(ui.transition_rows(tail, kind), style="padding:4px 16px 8px"))
 
+
+def _rs_movers_card() -> None:
+    """The largest changes in cross-sectional standing since the previous close."""
     movers = rs_movers(DATA, SNAP.previous, count=12)
-    if not movers.empty:
-        st.write("")
-        rows = "".join(
-            f'<a class="ws-shelf" target="_self" href="{ui.stock_href(r["Symbol"])}" '
-            f'style="text-decoration:none;color:var(--ink)">'
-            f'<span style="font-weight:700;font-size:14px;min-width:110px">{ui.esc(r["Symbol"])}</span>'
-            f'<span class="num" style="font-size:12.5px;color:var(--sub);flex:1 1 120px">'
-            f'{fmt_rs(r["RS_Previous"])} → <b style="color:var(--ink)">{fmt_rs(r["RS_Score"])}</b></span>'
-            f'<span class="num" style="font-weight:700;font-size:13px;'
-            f'color:{theme.signed_color(r["RS_Change"])}">{r["RS_Change"]:+.0f}</span></a>'
-            for _, r in movers.iterrows()
+    if movers.empty:
+        return
+    st.write("")
+    rows = "".join(
+        f'<a class="ws-shelf" target="_self" href="{ui.stock_href(r["Symbol"])}" '
+        f'style="text-decoration:none;color:var(--ink)">'
+        f'<span style="font-weight:700;font-size:14px;min-width:110px">{ui.esc(r["Symbol"])}</span>'
+        f'<span class="num" style="font-size:12.5px;color:var(--sub);flex:1 1 120px">'
+        f'{fmt_rs(r["RS_Previous"])} → <b style="color:var(--ink)">{fmt_rs(r["RS_Score"])}</b></span>'
+        f'<span class="num" style="font-weight:700;font-size:13px;'
+        f'color:{theme.signed_color(r["RS_Change"])}">{r["RS_Change"]:+.0f}</span></a>'
+        for _, r in movers.iterrows()
+    )
+    write(
+        ui.card(
+            '<div style="font-size:14.5px;font-weight:700;margin-bottom:2px">Largest RS rank changes</div>'
+            '<div class="ws-note" style="margin-bottom:4px">RS is a cross-sectional percentile, so a '
+            "change is a change in standing against the universe, not a return.</div>" + rows,
+            style="padding:14px 16px 8px",
         )
-        write(
-            ui.card(
-                '<div style="font-size:14.5px;font-weight:700;margin-bottom:2px">Largest RS rank changes</div>'
-                '<div class="ws-note" style="margin-bottom:4px">RS is a cross-sectional percentile, so a '
-                "change is a change in standing against the universe, not a return.</div>" + rows,
-                style="padding:14px 16px 8px",
-            )
-        )
+    )
 
 
 # --- Stock ------------------------------------------------------------------
@@ -1109,9 +1353,23 @@ def page_stock() -> None:
     if not symbols:
         write(ui.missing_notice("No symbols in the snapshot.", "The research snapshot is empty."))
         return
-    st.selectbox("Symbol", symbols, key="symbol")
+    # The symbol picker keeps its place for a reader already on this page; the
+    # header search is how they arrive from anywhere else.
+    picker = st.columns([4, 1], vertical_alignment="bottom")
+    picker[0].selectbox("Symbol", symbols, key="symbol")
     symbol = st.session_state["symbol"]
     row = DATA.loc[DATA["Symbol"] == symbol].iloc[0]
+
+    starred = symbol in watchlist()
+    if picker[1].button(
+        "★ Starred" if starred else "☆ Watch",
+        key="watch_toggle",
+        use_container_width=True,
+        help="Adds this stock to the watchlist carried in the page address, so a bookmark keeps it.",
+    ):
+        names = watchlist()
+        set_watchlist([n for n in names if n != symbol] if starred else names + [symbol])
+        st.rerun()
 
     stage = row.get("Stage")
     color = stage_color(stage)
@@ -1173,6 +1431,15 @@ def page_stock() -> None:
         f'<span style="color:var(--sub)">{ui.esc(row.get("Action_Reason", ""))}</span></div>'
     )
 
+    # The guide's own Signal / Value / Threshold / Met table. Built in
+    # signal_card.py and, until now, rendered by nothing — so the page stated
+    # each threshold in prose inside three separate checklists and never once
+    # put the value beside the rule it has to clear.
+    st.write("")
+    write('<div class="ws-eyebrow" style="margin-bottom:8px">Value against threshold</div>')
+    write(ui.threshold_table(signal_card.signal_rows(row)))
+
+    st.write("")
     _stock_chart(symbol, row)
 
     left, right = st.columns(2, gap="medium")
@@ -1715,10 +1982,11 @@ def page_methodology() -> None:
             "template thresholds remain provisional pending verification against the source text. "
             "No Action label reads any v2.2 field. The nine-label mechanical "
             "mapping is this project's specification adopted from the supplied NSE Signal "
-            "Interpretation Guide, not a verbatim rule from either book. The visual system and layout "
-            "follow the WealthStar reference terminal as a design source. Prices are end-of-day from "
-            "yfinance with auto-adjustment; volume is unadjusted. Figures are for study, not "
-            "real-time execution.",
+            "Interpretation Guide, not a verbatim rule from either book. Prices are end-of-day from "
+            "yfinance with auto-adjustment; volume is unadjusted; the benchmark index is the "
+            "Nifty 500. Figures are for study, not real-time execution. The visual system is "
+            "credited in the colophon at the foot of every page — it is a design reference, not "
+            "a source of method.",
         ),
     ]
     for title, body in sections:
@@ -1879,17 +2147,19 @@ def page_setups() -> None:
         f'<div class="ws-note" style="margin:2px 0 10px"><b style="color:var(--ink)">{len(view):,}</b> '
         f"match · searched over {pool_note} · sorted by {ui.esc(sort_label.lower())}</div>"
     )
+    setup_cols = ui.setup_columns(view)
     write(
         ui.screener_table(
-            view.head(PAGE_SIZE), cached_sparklines(), columns=ui.SETUP_COLUMNS,
-            sorted_by=None,
+            view.head(PAGE_SIZE), cached_sparklines(), columns=setup_cols,
+            sorted_by=None, caption=f"Stocks matching the {label} setup",
         )
     )
     if len(view) > PAGE_SIZE:
         with st.expander(f"The remaining {len(view) - PAGE_SIZE:,}"):
             write(
                 ui.screener_table(
-                    view.iloc[PAGE_SIZE:], cached_sparklines(), columns=ui.SETUP_COLUMNS
+                    view.iloc[PAGE_SIZE:], cached_sparklines(), columns=setup_cols,
+                    caption=f"Further stocks matching the {label} setup",
                 )
             )
 
@@ -1909,15 +2179,30 @@ def page_setups() -> None:
     )
 
 
+# --- Find -------------------------------------------------------------------
+#: The three things a reader searches over. They were three destinations; they
+#: are the same table with different predicates and column sets, and keeping
+#: them apart meant a filter built in one had to be rebuilt in the next.
+FIND_MODES = ["Stocks", "Setups", "Industries"]
+
+
+def page_find() -> None:
+    requested = st.query_params.get("mode")
+    if requested not in FIND_MODES:
+        requested = LEGACY_FIND_MODE.get(st.query_params.get("view"), "Stocks")
+    if "find_mode" not in st.session_state:
+        st.session_state["find_mode"] = requested
+    mode = st.segmented_control(
+        "What to search", FIND_MODES, key="find_mode", label_visibility="collapsed"
+    ) or "Stocks"
+    {"Stocks": page_screener, "Setups": page_setups, "Industries": page_industries}[mode]()
+
+
 PAGES = {
-    "Dashboard": page_dashboard,
-    "Setups": page_setups,
-    "Screener": page_screener,
-    "Industries": page_industries,
-    "Market": page_market,
-    "Movers": page_movers,
+    "Today": page_today,
+    "Find": page_find,
     "Stock": page_stock,
-    "Methodology": page_methodology,
+    "Method": page_methodology,
 }
-PAGES.get(VIEW, page_dashboard)()
+PAGES.get(VIEW, page_today)()
 write(theme.FOOTER)

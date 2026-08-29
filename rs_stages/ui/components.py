@@ -52,6 +52,19 @@ def query_href(**params: Any) -> str:
     return html.escape(f"?{query}", quote=True)
 
 
+def query_href_multi(params: dict[str, Any], **repeated: list[Any]) -> str:
+    """An in-app link where one parameter may appear more than once.
+
+    Streamlit reads a repeated parameter as a list, which is how a multi-select
+    filter is addressed. query_href takes one value per key and cannot express
+    that, so a link to "every SELL and REDUCE" needed this.
+    """
+    parts = [f"{k}={quote(str(v), safe='')}" for k, v in params.items() if v is not None]
+    for key, values in repeated.items():
+        parts.extend(f"{key}={quote(str(v), safe='')}" for v in values)
+    return html.escape("?" + "&".join(parts), quote=True)
+
+
 def stock_href(symbol: Any) -> str:
     """Link into the Stock view for a symbol."""
     return query_href(view="Stock", symbol=symbol)
@@ -133,19 +146,41 @@ def action_chip(action: Any) -> str:
 
 
 def stage_cell(stage: Any) -> str:
-    """Stage in a table row: dot, number, and the name it stands for.
+    """Stage in a table row: marked dot, number, and the name it stands for.
 
     The name is wrapped so the mobile stylesheet can drop it and keep the row
-    within 390px; the dot already carries the same colour, so nothing is lost
-    beyond the word.
+    within 390px. The dot then carries the reading on its own, so it is not
+    left to colour alone: each Stage gets a glyph that says which direction it
+    describes. Roughly one man in twelve cannot separate the Stage 2 green from
+    the Stage 4 red, and those are the two that decide whether to hold.
     """
     key = stage_key(stage)
     if key not in {"Stage 1", "Stage 2", "Stage 3", "Stage 4"}:
         return f'<span style="color:var(--faint)">{DASH}</span>'
     name = stage_display(stage).split(" · ")[1]
     return (
-        f'<span class="ws-stage">{dot(stage_color(stage))}{esc(key)}'
+        f'<span class="ws-stage">{stage_mark(stage)}{esc(key)}'
         f'<span class="stage-name">· {esc(name)}</span></span>'
+    )
+
+
+#: A glyph per Stage, so the four are distinguishable without colour vision.
+#: Chosen to describe the Stage's own direction, not to rank it: advancing
+#: rises, declining falls, basing is flat, topping turns over.
+STAGE_MARKS = {"Stage 1": "=", "Stage 2": "▲", "Stage 3": "◆", "Stage 4": "▼"}
+
+
+def stage_mark(stage: Any, size: int = 15) -> str:
+    """The Stage dot, carrying its glyph."""
+    key = stage_key(stage)
+    color = stage_color(stage)
+    glyph = STAGE_MARKS.get(key)
+    if glyph is None:
+        return dot(color)
+    return (
+        f'<span class="ws-stage-mark" aria-hidden="true" '
+        f'style="width:{size}px;height:{size}px;background:{color}1F;color:{color}">'
+        f"{glyph}</span>"
     )
 
 
@@ -339,15 +374,6 @@ STATUS_MARKS = {
 }
 
 
-def signal_line(label: str, value: str, tone: str = "neutral") -> str:
-    """One line of the Signal Card: what the measure is, and what it reads."""
-    color = {"good": POSITIVE, "warn": "#966316", "bad": NEGATIVE}.get(tone, "var(--ink)")
-    return (
-        f'<div class="ws-sigline"><span class="ws-sigline-label">{esc(label)}</span>'
-        f'<span class="ws-sigline-value" style="color:{color}">{esc(value)}</span></div>'
-    )
-
-
 def signal_note(kind: str, text: str) -> str:
     """A WAIT / conflict / caution note. Absent notes render nothing at all."""
     if not text:
@@ -441,10 +467,23 @@ PREBREAKOUT_COLUMNS = (
 #: The Setups view's columns. Deliberately omits Action: §11 assigns every
 #: Stage 1 stock the same label, so showing it beside a readiness ranking would
 #: imply the label were varying with the score. It is not.
+#:
+#: Readiness is undefined outside Stage 1, so on a Stage 2 list it is a column
+#: of em dashes wide enough to push a real column off the screen. It is added
+#: by :func:`setup_columns` only where it can carry a value.
 SETUP_COLUMNS = (
     "symbol", "evidence", "template", "rs", "stage",
-    "rsline", "contraction", "dryup", "pivot", "readiness",
+    "rsline", "contraction", "dryup", "pivot",
 )
+
+
+def setup_columns(frame: "pd.DataFrame") -> tuple[str, ...]:
+    """Setup columns, plus readiness when the rows shown can actually have one."""
+    if "Stage1_Readiness" not in frame.columns:
+        return SETUP_COLUMNS
+    if not pd.to_numeric(frame["Stage1_Readiness"], errors="coerce").notna().any():
+        return SETUP_COLUMNS
+    return SETUP_COLUMNS + ("readiness",)
 
 #: The four published pre-breakout conditions, in the order the Setups view
 #: lists them. Evidence is how many a stock satisfies at once.
@@ -571,6 +610,7 @@ def screener_table(
     columns: Sequence[str] | None = None,
     sorted_by: str | None = None,
     ascending: bool = False,
+    caption: str = "Stocks in the validated snapshot",
 ) -> str:
     """Render the dense stock table.
 
@@ -580,11 +620,15 @@ def screener_table(
     ``ascending`` points the sort marker the way the sort actually runs. It was
     previously drawn as ▼ on every sorted column, so "RS (low to high)" was
     marked as descending.
+
+    ``caption`` names the table for assistive technology and labels the scroll
+    region. The region is focusable so a keyboard user can scroll a table that
+    still overflows at their width.
     """
     keys = list(columns or MOMENTUM_COLUMNS)
     marker = " ▲" if ascending else " ▼"
     header = "".join(
-        '<th class="{cls}">{label}</th>'.format(
+        '<th scope="col" class="{cls}">{label}</th>'.format(
             cls=" ".join(
                 filter(
                     None,
@@ -627,7 +671,9 @@ def screener_table(
             "Filters change presentation only — widen them to see more of the same validated snapshot.",
         )
     return (
-        '<div class="ws-table-wrap"><div class="ws-scroll"><table class="ws-table">'
+        '<div class="ws-table-wrap"><div class="ws-scroll" tabindex="0" role="region" '
+        f'aria-label="{esc(caption)}"><table class="ws-table">'
+        f"<caption>{esc(caption)}</caption>"
         f"<thead><tr>{header}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
         "</table></div></div>"
     )
@@ -640,6 +686,212 @@ def _plural(count: Any, noun: str) -> str:
         return f"{DASH} {noun}s"
     number = int(value)
     return f"{number:,} {noun}" if number == 1 else f"{number:,} {noun}s"
+
+
+#: The industry map's diverging scale. Median RS is a percentile whose midpoint
+#: carries the site's own meaning — 50 is the line between lagging and adequate —
+#: so the reading is polarity, not magnitude: two hues meeting at a neutral,
+#: never one hue getting darker and never a rainbow.
+#:
+#: The two poles are deliberately not mirror images in lightness. A saturated
+#: red and a saturated green of equal luminance are the textbook red-green
+#: confusion: measured against deuteranopic and protanopic vision, the site's
+#: own POSITIVE and NEGATIVE separated by only ΔE 6.9 — inside the band where
+#: colour alone cannot be relied on. A pale red against a mid green measures
+#: ΔE 14.7, comfortably clear. Both poles are also light enough to carry ink
+#: text at 4.5:1, so a tile's label never has to flip colour partway along the
+#: ramp and land in the gap where neither ink nor paper reaches AA.
+#:
+#: The asymmetry is the accessibility fix and it is shown, not hidden: the
+#: legend draws the actual ramp, so a reader can see the scale is not
+#: symmetric, and every tile carries its own RS number, so the reading never
+#: rests on colour alone.
+RS_DIVERGING = {
+    "low": (0xEF, 0xA9, 0xA3),
+    "mid": (0xED, 0xEE, 0xF1),
+    "high": (0x3E, 0x8E, 0x76),
+    "centre": 50.0,
+    "span": 30.0,
+}
+
+#: An industry whose median RS could not be computed. Neutral, not a pole.
+RS_DIVERGING_UNAVAILABLE = "#E4E6EA"
+
+#: One label colour for every tile on the ramp. See label_contrast().
+_LABEL_INK = (0x14, 0x17, 0x1B)
+LABEL_INK = "#14171B"
+
+
+def _rs_diverging(rs: float) -> str:
+    """Colour for a median RS on the diverging scale, clamped to +/- span."""
+    scale = RS_DIVERGING
+    offset = max(-1.0, min(1.0, (rs - scale["centre"]) / scale["span"]))
+    pole = scale["high"] if offset >= 0 else scale["low"]
+    weight = abs(offset)
+    mid = scale["mid"]
+    channels = [round(mid[i] + (pole[i] - mid[i]) * weight) for i in range(3)]
+    return "#%02X%02X%02X" % tuple(channels)
+
+
+def _relative_luminance(rgb: Sequence[int]) -> float:
+    """WCAG 2.1 relative luminance for an 8-bit RGB triple."""
+    channels = []
+    for value in rgb:
+        linear = value / 255
+        channels.append(linear / 12.92 if linear <= 0.03928 else ((linear + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast(a: Sequence[int], b: Sequence[int]) -> float:
+    high, low = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def label_contrast(hex_color: str) -> float:
+    """Contrast of the tile label against that tile. Asserted on by the tests.
+
+    Both poles of RS_DIVERGING are chosen light enough for one ink colour to
+    clear 4.5:1 across the whole ramp. A ramp with a dark pole would need the
+    label to flip to paper partway along, and every continuous ramp has a band
+    near that crossover where neither ink nor paper reaches AA.
+    """
+    raw = hex_color.lstrip("#")
+    tile = tuple(int(raw[index : index + 2], 16) for index in (0, 2, 4))
+    return _contrast(_LABEL_INK, tile)
+
+
+def _squarify(values: Sequence[float], x: float, y: float, width: float, height: float) -> list[tuple]:
+    """Squarified treemap layout: rectangles in the order the values arrive.
+
+    Values must be sorted descending. Returns (x, y, w, h) per value, in the
+    same coordinate space as the container passed in. The algorithm is Bruls,
+    Huizing and van Wijk's: fill the shorter side with a row, extending it while
+    the worst aspect ratio in the row keeps improving.
+    """
+    rectangles: list[tuple] = []
+    remaining = list(values)
+    total = sum(remaining)
+    if total <= 0 or width <= 0 or height <= 0:
+        return [(x, y, 0.0, 0.0) for _ in remaining]
+    # Work in area units so a row's thickness follows directly from its sum.
+    scale = (width * height) / total
+    areas = [value * scale for value in remaining]
+
+    def worst(row: list[float], side: float) -> float:
+        if not row or side <= 0:
+            return float("inf")
+        total_row = sum(row)
+        if total_row <= 0:
+            return float("inf")
+        side_sq = side * side
+        total_sq = total_row * total_row
+        return max(side_sq * max(row) / total_sq, total_sq / (side_sq * min(row)))
+
+    index = 0
+    while index < len(areas):
+        side = min(width, height)
+        row: list[float] = []
+        while index < len(areas):
+            candidate = row + [areas[index]]
+            if row and worst(candidate, side) > worst(row, side):
+                break
+            row = candidate
+            index += 1
+        thickness = sum(row) / side if side else 0.0
+        offset = 0.0
+        for area in row:
+            length = area / thickness if thickness else 0.0
+            if width >= height:
+                rectangles.append((x, y + offset, thickness, length))
+            else:
+                rectangles.append((x + offset, y, length, thickness))
+            offset += length
+        if width >= height:
+            x += thickness
+            width -= thickness
+        else:
+            y += thickness
+            height -= thickness
+    return rectangles
+
+
+def industry_map(frame: pd.DataFrame, min_stocks: int = 5, height: int = 400) -> str:
+    """Industries as a map: area is constituent count, colour is median RS.
+
+    A ranked list answers "which industry is first". It cannot answer "where is
+    the weight", which is the question that made a one-stock industry sit ninth
+    in a leadership table without anything on screen saying it was one stock.
+    Area says so immediately.
+    """
+    if frame.empty or "Median_RS" not in frame.columns:
+        return ""
+    work = frame.copy()
+    work["_size"] = pd.to_numeric(work.get("Stocks"), errors="coerce").fillna(0.0)
+    work["_rs"] = pd.to_numeric(work["Median_RS"], errors="coerce")
+    work = work[work["_size"] > 0].sort_values("_size", ascending=False)
+    if work.empty:
+        return ""
+
+    boxes = _squarify(work["_size"].tolist(), 0.0, 0.0, 100.0, 100.0)
+    tiles = []
+    for (left, top, box_width, box_height), (_, row) in zip(boxes, work.iterrows()):
+        rs = to_float(row.get("_rs"))
+        color = _rs_diverging(rs) if math.isfinite(rs) else RS_DIVERGING_UNAVAILABLE
+        stocks = int(to_float(row.get("_size")))
+        name = str(row.get("Industry"))
+        thin = stocks < min_stocks
+        # Every tile carries its full label; the stylesheet drops the parts
+        # that will not fit, using the tile's own rendered size as a container
+        # query. How much a tile can hold is a question about pixels, and the
+        # same percentage is a comfortable box at 1100px and a sliver at 390px,
+        # so this is not a decision the server can make. A tile too small even
+        # for a number keeps its colour and its tooltip, and the table beneath
+        # names every industry in full.
+        label = (
+            f'<span class="ws-map-name">{esc(name)}</span>'
+            f'<span class="ws-map-rs num">{fmt_rs(rs)}</span>'
+            f'<span class="ws-map-n num">{stocks}</span>'
+        )
+        stage2 = to_float(row.get("Stage2"))
+        stage2_text = (
+            f" · {int(stage2)} in Stage 2" if math.isfinite(stage2) else ""
+        )
+        tooltip = (
+            f"{name} — median RS {fmt_rs(rs)}{stage2_text} · "
+            f"{_plural(stocks, 'stock')}"
+            + (" · too few for a group median" if thin else "")
+        )
+        tiles.append(
+            f'<a class="ws-map-tile" target="_self" '
+            f'href="{query_href(view="Find", mode="Industries", industry=name)}" '
+            f'title="{esc(tooltip)}" aria-label="{esc(tooltip)}" '
+            f'style="left:{left:.4f}%;top:{top:.4f}%;width:{box_width:.4f}%;'
+            f'height:{box_height:.4f}%;background:{color}'
+            + (";opacity:.55" if thin else "")
+            + f'">{label}</a>'
+        )
+
+    # The scale is continuous, so the legend is the scale itself with its
+    # midpoint named — the reader has to know 50 is the meeting point, not a
+    # colour they have to infer.
+    low = _rs_diverging(RS_DIVERGING["centre"] - RS_DIVERGING["span"])
+    high = _rs_diverging(RS_DIVERGING["centre"] + RS_DIVERGING["span"])
+    mid = _rs_diverging(RS_DIVERGING["centre"])
+    legend = (
+        '<div class="ws-map-legend">'
+        '<span class="ws-note">Area is constituent count · colour is median RS</span>'
+        '<span class="ws-map-scale">'
+        f'<span class="cap num">{RS_DIVERGING["centre"] - RS_DIVERGING["span"]:.0f}</span>'
+        f'<span class="ramp" style="background:linear-gradient(90deg,{low},{mid},{high})"></span>'
+        f'<span class="cap num">{RS_DIVERGING["centre"] + RS_DIVERGING["span"]:.0f}</span>'
+        "</span></div>"
+    )
+    return card(
+        '<div class="ws-card-title">Where the weight sits</div>'
+        f'<div class="ws-map" style="height:{height}px" role="group" '
+        'aria-label="Industries sized by constituent count and coloured by median relative strength">'
+        f'{"".join(tiles)}</div>{legend}'
+    )
 
 
 def industry_table(frame: pd.DataFrame, min_stocks: int = 5) -> str:
@@ -661,7 +913,7 @@ def industry_table(frame: pd.DataFrame, min_stocks: int = 5) -> str:
         )
     has_stage2 = "Stage2" in frame.columns
     head = (
-        '<div class="ws-irow-head"><span class="ws-irank">#</span>'
+        '<div class="ws-irow-head" role="row"><span class="ws-irank">#</span>'
         '<span class="ws-iname">Industry</span>'
         '<span class="ws-irs">Strength (median RS)</span>'
         + ('<span class="ws-inum col-hide-sm">Stage 2</span>' if has_stage2 else "")

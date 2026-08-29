@@ -277,7 +277,14 @@ def oneil_checklist(row: Any) -> list[tuple[str, bool]]:
 
 
 def source_line(row: Any) -> str:
-    """Trace the reading back to the book it comes from, all three combined."""
+    """Trace the reading back to the book it comes from, all three combined.
+
+    The Stock page renders the three author lines separately, so this combined
+    form is not itself displayed. It is kept because the test suite asserts
+    against it that the three lines concatenate to exactly this and nothing
+    else, which is the invariant that stops one author's evidence drifting into
+    another's box.
+    """
     return " · ".join(filter(None, [weinstein_line(row), oneil_line(row), minervini_line(row)]))
 
 

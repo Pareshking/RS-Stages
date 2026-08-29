@@ -43,8 +43,17 @@ Locked methodology includes calendar-date RS lookbacks, a 30-calendar-week MA, a
 ## Published Artifacts
 
 The Real Data Research Audit workflow publishes `data/latest_research.csv`,
-`data/previous_research.csv` and `data/breadth_history.csv` to the repository,
-and `price_panel.npz` as a rolling **release asset** on the `data-latest` tag.
+`data/previous_research.csv`, `data/breadth_history.csv` and
+`data/freshness_history.csv` to the repository, and `price_panel.npz` as a
+rolling **release asset** on the `data-latest` tag.
+
+`freshness_history.csv` is one row per run recording how much of the universe
+carried the newest session. The provider publishes asynchronously, larger and
+more liquid names first, so a share of the universe can still be on the
+previous session when the audit runs — and because RS is a cross-sectional
+percentile, that share is the size of the population being ranked across two
+sessions. The schedule has moved twice on estimates of the provider's
+publishing curve; this file is what makes a third move a measurement.
 
 The panel is not committed on purpose: it is a regenerated binary that Git
 cannot delta, so committing it would add ~1.4 MB of permanent history per run.
@@ -61,8 +70,8 @@ All signals respect the pre-market information boundary: the latest completed NS
 
 | Workflow | Fires | Purpose |
 | --- | --- | --- |
-| `real_data_audit.yml` | 01:00 UTC / 6:30 IST, Tue-Sat | The morning after each Mon-Fri session, giving the price provider the full night rather than the same evening (D-2.2.12). |
-| `audit_watchdog.yml` | 02:00 UTC, Tue-Sat | An hour later, same days. Retriggers the audit if it did not run at all — GitHub documents `schedule:` as best-effort and known to drop a firing outright, not only delay it (D-2.2.13). |
+| `real_data_audit.yml` | 02:30 UTC / 8:00 IST, Tue-Sat | The morning after each Mon-Fri session (D-2.2.12), moved later still because two thirds of the universe was arriving a session behind (D-2.2.14). Publication lands about an hour before the 09:15 IST open. |
+| `audit_watchdog.yml` | 03:10 UTC, Tue-Sat | Forty minutes later, same days. Retriggers the audit if it did not run at all — GitHub documents `schedule:` as best-effort and known to drop a firing outright, not only delay it (D-2.2.13). |
 | `update_nse_universe.yml` | 17:15 UTC, Fri | The constituent list. Lands well ahead of the next audit run (Saturday morning), never on the same calendar day. |
 
 ### One-time setup: two secrets, created once by the repository owner
