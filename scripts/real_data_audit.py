@@ -206,11 +206,17 @@ def independent_contraction(
         chunk = base[block * 10 : block * 10 + 10]
         highs = [r[0] for r in chunk]
         lows = [r[1] for r in chunk]
-        closes = [r[2] for r in chunk]
-        mean_close = sum(closes) / len(closes)
-        if mean_close == 0:
+        closes = np.asarray([r[2] for r in chunk], dtype=float)
+        highs = np.asarray([r[0] for r in chunk], dtype=float)
+        lows = np.asarray([r[1] for r in chunk], dtype=float)
+        mean_close = float(np.nanmean(closes))
+        if not np.isfinite(mean_close) or mean_close == 0:
             raise ValueError("degenerate base")
-        ranges.append((max(highs) - min(lows)) / mean_close * 100.0)
+        high_max = float(np.nanmax(highs))
+        low_min = float(np.nanmin(lows))
+        if not np.isfinite(high_max) or not np.isfinite(low_min):
+            raise ValueError("degenerate base")
+        ranges.append((high_max - low_min) / mean_close * 100.0)
     tightenings = sum(1 for a, b in zip(ranges, ranges[1:]) if b < a)
     return tightenings, ranges[-1] / ranges[0]
 
@@ -220,12 +226,13 @@ def independent_volume_dryup(volume: pd.Series, decision: pd.Timestamp) -> float
     values = [float(v) for stamp, v in volume.sort_index().items() if stamp <= decision]
     if len(values) < 60:
         raise ValueError("insufficient history")
-    recent = values[-10:]
-    baseline = values[-60:-10]
-    mean_baseline = sum(baseline) / len(baseline)
-    if mean_baseline == 0:
+    recent = np.asarray(values[-10:], dtype=float)
+    baseline = np.asarray(values[-60:-10], dtype=float)
+    mean_recent = float(np.nanmean(recent))
+    mean_baseline = float(np.nanmean(baseline))
+    if not np.isfinite(mean_recent) or not np.isfinite(mean_baseline) or mean_baseline == 0:
         raise ValueError("degenerate baseline")
-    return (sum(recent) / len(recent)) / mean_baseline
+    return mean_recent / mean_baseline
 
 
 def independent_pivot(high: pd.Series, decision: pd.Timestamp) -> float:
