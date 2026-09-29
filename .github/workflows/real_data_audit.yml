@@ -4,7 +4,8 @@ on:
   # Keep the normal morning run away from :00, where GitHub documents the
   # highest scheduler load and possible dropped scheduled events.
   # Keep the audit workflow file in the push trigger below: operational changes
-  # to acquisition/provider mapping intentionally launch one immediate recovery run.
+  # to acquisition/provider mapping and audit reconciliation intentionally launch
+  # one immediate recovery run.
   schedule:
     - cron: "17 1 * * 2-6"
   # A workflow-file change is an intentional recovery/validation trigger. It
