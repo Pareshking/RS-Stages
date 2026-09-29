@@ -99,6 +99,6 @@ def test_the_freshness_check_uses_published_artifact_date_not_a_rolling_window()
     text = WATCHDOG.read_text()
     assert "hours ago" not in text
     assert 'assets[] | select(.name=="price_panel.npz") | .updated_at' in text
-    assert 'today=\$(date -u +%Y-%m-%d)' in text
-    assert 'asset_date=\$(gh api' in text
-    assert 'if [ "\$asset_date" = "\$today" ]' in text
+    assert 'today=$(date -u +%Y-%m-%d)' in text
+    assert 'asset_date=$(gh api' in text
+    assert 'if [ "$asset_date" = "$today" ]' in text
