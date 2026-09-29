@@ -61,45 +61,33 @@ All signals respect the pre-market information boundary: the latest completed NS
 
 | Workflow | Fires | Purpose |
 | --- | --- | --- |
-| `real_data_audit.yml` | 01:00 UTC / 6:30 IST, Tue-Sat | The morning after each Mon-Fri session, giving the price provider the full night rather than the same evening (D-2.2.12). |
-| `audit_watchdog.yml` | 02:00 UTC, Tue-Sat | An hour later, same days. Retriggers the audit if it did not run at all — GitHub documents `schedule:` as best-effort and known to drop a firing outright, not only delay it (D-2.2.13). |
+| `real_data_audit.yml` | 01:17 UTC / 6:47 IST, Tue-Sat | The morning after each Mon-Fri session. The non-zero minute avoids GitHub's documented top-of-hour scheduler load; workflow-file changes also trigger one controlled recovery run. |
+| `audit_watchdog.yml` | 02:17 UTC / 7:47 IST, Tue-Sat | Checks the actual `price_panel.npz` release asset freshness and dispatches the audit with `GITHUB_TOKEN` when stale. It no longer depends on a PAT secret. |
 | `update_nse_universe.yml` | 17:15 UTC, Fri | The constituent list. Lands well ahead of the next audit run (Saturday morning), never on the same calendar day. |
 
-### One-time setup: two secrets, created once by the repository owner
+### One-time setup: Streamlit dispatch secret
 
-Two features need a GitHub personal access token that only the owner can
-create — neither Claude nor any workflow can generate one on your behalf,
-since issuing a credential is deliberately a human-only action.
+The Dashboard's optional "Trigger audit now" control uses the Streamlit secret
+`GITHUB_DISPATCH_TOKEN`. The deployed app needs that secret to show the control;
+the public dashboard otherwise remains unchanged.
 
-**Create the token once:** GitHub -> Settings -> Developer settings -> Personal
-access tokens -> Fine-grained tokens -> Generate new token. Scope it to this
-repository only, with **Actions: Read and write** permission. Nothing else is
-needed.
-
-**Use it in two places**, because it unlocks two independent features and each
-lives in a different secrets store:
-
-1. **The watchdog's retrigger step** (`audit_watchdog.yml`) needs it as a
-   **GitHub repository secret** named `WORKFLOW_TRIGGER_PAT`: this repo's
-   Settings -> Secrets and variables -> Actions -> New repository secret.
-   Without it, the watchdog still runs and still checks whether the audit
-   fired, but fails loudly (`::error::`, not a silent no-op) when it finds a
-   gap and cannot retrigger it.
-
-2. **The Dashboard's "Trigger audit now" button** (bottom of the Dashboard
-   view, in an expander) needs it as a **Streamlit secret** named
-   `GITHUB_DISPATCH_TOKEN`: the deployed app's Settings -> Secrets, in the
-   Streamlit Community Cloud dashboard. Without it, the button and its
-   expander do not render at all — the Dashboard degrades to exactly what it
-   showed before this feature existed, never an error.
-
-The same token value goes in both places. They are separate stores on separate
-platforms; setting one does not set the other.
+The automated watchdog no longer needs `WORKFLOW_TRIGGER_PAT`. GitHub permits a
+workflow using `GITHUB_TOKEN` to create a `workflow_dispatch` run, so the
+watchdog now uses the repository token directly for both freshness checks and
+retriggering.
 
 The button's rate limit (one trigger per `dispatch.COOLDOWN_MINUTES`, 20 by
 default) is checked against the audit workflow's own run history on GitHub,
 not against anything stored per-browser — it holds across every visitor at
 once, since the site is public with no login.
+
+### Provider ticker aliases
+
+The NSE universe remains authoritative. Provider-specific ticker differences are
+kept as explicit acquisition aliases. In particular, NSE currently identifies
+HEG Advanced Materials as `HEGAM`, while Yahoo still serves its NSE history as
+`HEG.NS`; the acquisition layer maps Yahoo's `HEG.NS` response back to the
+analytical `HEGAM` symbol. The universe is not renamed or silently substituted.
 
 ## Validation Status
 
