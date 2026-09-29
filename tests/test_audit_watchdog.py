@@ -1,6 +1,6 @@
 """The watchdog must check strictly after the audit's own schedule, on the
-same days, and must fail loudly rather than silently no-op when its
-retrigger token is missing.
+same days, and dispatch with the repository token when the published price
+artifact is stale.
 
 Parsed with the standard library only, matching test_workflow_scheduling.py
 -- PyYAML is absent from the resolved production environment.
@@ -80,18 +80,12 @@ def test_the_watchdog_does_not_push_and_is_excluded_from_the_push_race_tests():
     )
 
 
-def test_a_missing_retrigger_token_fails_loudly_rather_than_silently_skipping():
+def test_the_retrigger_step_uses_github_token_for_dispatch():
+    """workflow_dispatch is explicitly allowed to create a run from GITHUB_TOKEN."""
     text = WATCHDOG.read_text()
-    assert "::error::" in text, "a missing token must be a visible failure, not a silent no-op"
-    assert "exit 1" in text
-
-
-def test_the_retrigger_step_uses_a_distinct_secret_from_the_automatic_token():
-    """The automatic GITHUB_TOKEN cannot dispatch another workflow run --
-    conflating the two would make the retrigger step fail every time."""
-    text = WATCHDOG.read_text()
-    assert "secrets.WORKFLOW_TRIGGER_PAT" in text
-    assert "github.token" in text  # still used for the read-only check
+    assert "secrets.WORKFLOW_TRIGGER_PAT" not in text
+    assert "github.token" in text
+    assert "actions: write" in text
 
 
 def test_the_watchdog_targets_the_real_audit_workflow_file():
