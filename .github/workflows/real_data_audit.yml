@@ -1,23 +1,17 @@
 name: Real Data Research Audit
 
 on:
-  # 01:00 UTC is 6:30 IST the *next* calendar day — run the morning after each
-  # session, not the same evening. Three consecutive sessions (24->25, 25->26,
-  # 26->27 Aug 2026) found the price provider still hadn't posted the day's
-  # close by 23:45 IST same-day, so the run fell back to the prior session
-  # every time. Moving to the next morning gives the provider roughly 15 hours
-  # after the 15:30 IST close instead of about 8, which is the actual fix —
-  # the boundary logic was never wrong, the provider just needed more time
-  # than a same-evening run gave it. See DECISION_LOG D-2.2.12.
-  #
-  # Day-of-week is shifted by one accordingly: a Monday session is picked up
-  # Tuesday morning, ... a Friday session Saturday morning. Mon-Fri sessions
-  # therefore need Tue-Sat runs (Sunday and Monday mornings have no preceding
-  # session to fetch). The universe refresh still fires Friday 17:15 UTC; it
-  # is now the *Saturday* run that lands after it with margin, not a same-day
-  # Friday one — see tests/test_workflow_scheduling.py.
+  # Keep the normal morning run away from :00, where GitHub documents the
+  # highest scheduler load and possible dropped scheduled events.
   schedule:
-    - cron: "0 1 * * 2-6"
+    - cron: "17 1 * * 2-6"
+  # A workflow-file change is an intentional recovery/validation trigger. It
+  # lets an operational fix immediately prove the complete publication path
+  # instead of waiting for the next scheduled window.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/real_data_audit.yml"
   workflow_dispatch:
     inputs:
       decision_date:
@@ -36,9 +30,11 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: rs-stages-real-data-audit
+  cancel-in-progress: false
+
 env:
-  # Rolling tag whose single asset is replaced on every run. Deliberately not a
-  # source release: it carries generated data, never code.
   DATA_TAG: data-latest
 
 jobs:
@@ -49,8 +45,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # Full history: publishing rebases onto whatever landed while this run
-          # was computing, and a depth-1 clone has no merge base to rebase onto.
           fetch-depth: 0
 
       - name: Set up Python
@@ -73,10 +67,35 @@ jobs:
             --end '${{ inputs.end_date }}' \
             --output data/latest_research.csv
 
-      # The price panel is published as a release asset, never committed. It is a
-      # regenerated binary that Git cannot delta, so committing it would add a
-      # fresh ~1.4 MB blob to history on every run, permanently. Replacing a
-      # single asset keeps exactly one copy and adds nothing to the repository.
+      # Commit the validated snapshot first. This ordering guarantees the
+      # rolling release can never become newer than the committed research
+      # snapshot if the git publication fails.
+      - name: Publish validated research snapshot
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/latest_research.csv \
+                  data/previous_research.csv \
+                  data/breadth_history.csv
+          if git diff --cached --quiet; then
+            echo "Validated research snapshot unchanged; continuing because the price panel still requires publication."
+          else
+            git commit -m "data: publish validated research snapshot"
+            for attempt in 1 2 3 4 5; do
+              if git push; then
+                echo "Snapshot published on attempt $attempt."
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "Could not publish the research snapshot after 5 attempts." >&2
+                exit 1
+              fi
+              echo "Push rejected; rebasing onto origin/main (attempt $attempt)."
+              git pull --rebase origin main
+            done
+          fi
+
       - name: Publish price panel as a release asset
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,44 +107,36 @@ jobs:
               --notes "Rolling price panel for the RS-Stages terminal. Replaced by each Real Data Research Audit run; not a source release." \
               --latest=false
           fi
-          gh release upload "$DATA_TAG" data/price_panel.npz --clobber
-          echo "Published $(du -h data/price_panel.npz | cut -f1) panel to release $DATA_TAG"
 
-      - name: Publish validated research snapshot
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest_research.csv \
-                  data/previous_research.csv \
-                  data/breadth_history.csv
-          if git diff --cached --quiet; then
-            echo "Validated research snapshot unchanged."
-            exit 0
-          fi
-          git commit -m "data: publish validated research snapshot"
-
-          # This job runs for about three minutes, so main can move underneath
-          # it — a human commit, or the Friday universe refresh. A bare push is
-          # then rejected non-fast-forward and the run dies at its very last
-          # step, having *already* replaced the price panel on the release. The
-          # published panel would sit one session ahead of the committed
-          # snapshot, which is precisely the drift panel_matches() refuses to
-          # draw through: the live terminal loses every chart until someone
-          # re-runs by hand.
-          #
-          # The audit writes only the three research CSVs and the universe
-          # refresh writes only the constituent list, so rebasing onto whatever
-          # landed can never conflict.
-          for attempt in 1 2 3 4 5; do
-            if git push; then
-              echo "Snapshot published on attempt $attempt."
-              exit 0
+          # --clobber is intentionally retained: GitHub requires the existing
+          # same-name asset to be replaced. Retry transient upload failures.
+          for attempt in 1 2 3; do
+            if gh release upload "$DATA_TAG" data/price_panel.npz --clobber; then
+              echo "Price panel uploaded on attempt $attempt."
+              break
             fi
-            echo "Push rejected; rebasing onto origin/main (attempt $attempt)."
-            git pull --rebase origin main
+            if [ "$attempt" -eq 3 ]; then
+              echo "Price panel upload failed after 3 attempts." >&2
+              exit 1
+            fi
+            sleep 10
           done
-          echo "Could not publish the research snapshot after 5 attempts." >&2
-          exit 1
+
+      - name: Verify published price panel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          local_sha=$(sha256sum data/price_panel.npz | awk '{print $1}')
+          remote_sha=$(gh api "repos/${{ github.repository }}/releases/tags/$DATA_TAG" \
+            --jq '.assets[] | select(.name=="price_panel.npz") | .digest' | sed 's/^sha256://')
+          remote_size=$(gh api "repos/${{ github.repository }}/releases/tags/$DATA_TAG" \
+            --jq '.assets[] | select(.name=="price_panel.npz") | .size')
+          local_size=$(stat -c '%s' data/price_panel.npz)
+          test -n "$remote_sha"
+          test "$local_sha" = "$remote_sha"
+          test "$local_size" = "$remote_size"
+          echo "Verified price panel publication: sha256=$local_sha size=$local_size"
 
       - name: Upload research output
         uses: actions/upload-artifact@v4
