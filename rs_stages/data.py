@@ -108,12 +108,23 @@ def load_nse_constituents_csv(path: str | Path) -> pd.DataFrame:
     return frame.loc[~frame["Symbol"].str.startswith("DUMMY", na=False)].copy()
 
 
+# Yahoo retained the former NSE ticker for HEG after NSE renamed the listing to
+# HEGAM. The analytical universe remains HEGAM; this is only a provider-side
+# ticker alias. Keep such exceptions explicit and narrowly scoped.
+YFINANCE_SYMBOL_OVERRIDES = {
+    "HEGAM": "HEG.NS",
+}
+
+
 def yfinance_symbol(symbol: str) -> str:
-    """Map an NSE CSV symbol to its Yahoo Finance NSE ticker without changing the universe."""
+    """Map an NSE CSV symbol to its Yahoo Finance ticker without changing the universe."""
     symbol = str(symbol).strip()
     if not symbol:
         raise ValueError("Empty NSE symbol")
-    return symbol if symbol.upper().endswith(".NS") else f"{symbol}.NS"
+    upper = symbol.upper()
+    if upper in YFINANCE_SYMBOL_OVERRIDES:
+        return YFINANCE_SYMBOL_OVERRIDES[upper]
+    return symbol if upper.endswith(".NS") else f"{symbol}.NS"
 
 
 #: Benchmark indices. These are NOT part of the analytical universe and never
@@ -249,7 +260,11 @@ def download_yfinance_histories(
 
     histories: dict[str, pd.DataFrame] = {}
     failures: dict[str, str] = {}
-    tickers = [yfinance_symbol(symbol) for symbol in normalized]
+    symbol_to_ticker = {symbol: yfinance_symbol(symbol) for symbol in normalized}
+    if len(set(symbol_to_ticker.values())) != len(symbol_to_ticker):
+        raise ValueError("Multiple NSE symbols map to the same Yahoo ticker")
+    ticker_to_symbol = {ticker: symbol for symbol, ticker in symbol_to_ticker.items()}
+    tickers = list(symbol_to_ticker.values())
 
     for offset in range(0, len(tickers), batch_size):
         batch_tickers = tickers[offset : offset + batch_size]
@@ -270,7 +285,7 @@ def download_yfinance_histories(
             continue
 
         for ticker in batch_tickers:
-            symbol = ticker.removesuffix(".NS")
+            symbol = ticker_to_symbol[ticker]
             try:
                 frame = _extract_bulk_ticker_frame(bulk, ticker)
                 if frame.empty:
