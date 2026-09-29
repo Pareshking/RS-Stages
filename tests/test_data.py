@@ -70,6 +70,10 @@ def test_yfinance_symbol_maps_nse_csv_symbol_only_for_provider():
     assert yfinance_symbol("RELIANCE.NS") == "RELIANCE.NS"
 
 
+def test_yfinance_symbol_uses_explicit_provider_alias_without_changing_nse_symbol():
+    assert yfinance_symbol("HEGAM") == "HEG.NS"
+
+
 def test_download_yfinance_history_uses_locked_policy_and_preserves_ohlcv(monkeypatch):
     calls = {}
     idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
@@ -122,6 +126,20 @@ def test_download_yfinance_history_rejects_missing_required_column(monkeypatch):
 
     with pytest.raises(ValueError, match="Missing required market columns"):
         download_yfinance_history("ABC", "2026-08-01", "2026-08-24")
+
+
+def test_bulk_yfinance_acquisition_preserves_provider_alias_under_nse_symbol_key(monkeypatch):
+    idx = pd.DatetimeIndex(["2026-08-20", "2026-08-21"])
+    columns = pd.MultiIndex.from_product([["HEG.NS"], ["Close", "High", "Volume"]])
+    source = pd.DataFrame(
+        [[110.0, 115.0, 1000], [112.0, 118.0, 1200]],
+        index=idx,
+        columns=columns,
+    )
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(download=lambda **kwargs: source.copy()))
+    got = download_yfinance_histories(["HEGAM"], "2026-08-01", "2026-08-24", batch_size=100)
+    assert list(got) == ["HEGAM"]
+    assert got["HEGAM"].loc[pd.Timestamp("2026-08-21"), "Volume"] == 1200
 
 
 def test_bulk_yfinance_acquisition_uses_bounded_batch_and_preserves_each_ticker(monkeypatch):
